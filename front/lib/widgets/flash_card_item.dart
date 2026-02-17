@@ -78,12 +78,12 @@ class _FlashCardItemState extends State<FlashCardItem> {
           // 카드 내용 (탭으로 뒤집기)
           _isEditing ? _buildEditMode(cs) : _buildCardContent(cs, card),
 
-          // 근거
-          if (_showEvidence && card.evidence.isNotEmpty)
-            _buildEvidence(cs, card),
-
-          // 액션 버튼
-          _buildActions(cs, card),
+          // 편집 모드가 아닐 때만 근거 + 액션 표시
+          if (!_isEditing) ...[
+            if (_showEvidence && card.evidence.isNotEmpty)
+              _buildEvidence(cs, card),
+            _buildActions(cs, card),
+          ],
         ],
       ),
     );
@@ -181,17 +181,12 @@ class _FlashCardItemState extends State<FlashCardItem> {
             const SizedBox(height: 12),
 
             // 카드 텍스트
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 200),
-              child: Text(
-                _showBack ? card.back : card.front,
-                key: ValueKey(_showBack),
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      height: 1.6,
-                      fontWeight:
-                          _showBack ? FontWeight.normal : FontWeight.w500,
-                    ),
-              ),
+            Text(
+              _showBack ? card.back : card.front,
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    height: 1.6,
+                    fontWeight: _showBack ? FontWeight.normal : FontWeight.w500,
+                  ),
             ),
           ],
         ),
@@ -253,6 +248,11 @@ class _FlashCardItemState extends State<FlashCardItem> {
                       _frontCtrl.text.trim(), _backCtrl.text.trim());
                   setState(() => _isEditing = false);
                 },
+                style: FilledButton.styleFrom(
+                  minimumSize: Size.zero,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                ),
                 child: const Text('저장'),
               ),
             ],
@@ -357,21 +357,23 @@ class _FlashCardItemState extends State<FlashCardItem> {
             ),
             const SizedBox(width: 4),
             // 채택
-            FilledButton.icon(
-              onPressed: card.isAccepted ? null : widget.onAccept,
-              icon: Icon(
-                card.isAccepted
-                    ? Icons.check_circle_rounded
-                    : Icons.check_rounded,
-                size: 18,
-              ),
-              label: Text(card.isAccepted ? '채택됨' : '채택'),
-              style: FilledButton.styleFrom(
-                minimumSize: Size.zero,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                backgroundColor:
-                    card.isAccepted ? AppTheme.acceptedColor : null,
+            Flexible(
+              child: FilledButton.icon(
+                onPressed: card.isAccepted ? null : widget.onAccept,
+                icon: Icon(
+                  card.isAccepted
+                      ? Icons.check_circle_rounded
+                      : Icons.check_rounded,
+                  size: 18,
+                ),
+                label: Text(card.isAccepted ? '채택됨' : '채택'),
+                style: FilledButton.styleFrom(
+                  minimumSize: Size.zero,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  backgroundColor:
+                      card.isAccepted ? AppTheme.acceptedColor : null,
+                ),
               ),
             ),
           ],

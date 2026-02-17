@@ -1,103 +1,140 @@
 # 데카드 MVP 체크리스트 (3일)
 
-> 목표: "PDF 올리고 → 근거 포함 카드 받고 → 검수하고 → 다운로드" 루프 완성
+> 목표: "PDF 올리고 → 근거 포함 카드 받고 → 검수하고 → 학습" 루프 완성
 
 ---
 
-## Day 1: 백엔드 (API + AI)
+## Day 1: 백엔드 (API + AI) ✅ 완료
 
 ### 프로젝트 세팅
-- [ ] FastAPI 프로젝트 구조 생성 (`back/`)
-- [ ] 의존성 설치 (fastapi, uvicorn, pdfplumber, anthropic, python-multipart)
-- [ ] 환경변수 설정 (`.env` — ANTHROPIC_API_KEY, APP_ENV 등)
-- [ ] CORS 설정 (localhost:3000 허용)
+- [x] FastAPI 프로젝트 구조 생성 (`back/`)
+- [x] 의존성 설치 (fastapi, uvicorn, pdfplumber, anthropic, python-multipart)
+- [x] 환경변수 설정 (`.env` — ANTHROPIC_API_KEY, APP_ENV 등)
+- [x] CORS 설정 (localhost + 로컬 IP 허용)
 
 ### PDF 처리
-- [ ] PDF 업로드 엔드포인트 (`POST /api/v1/upload`)
-- [ ] pdfplumber로 페이지별 텍스트 추출
-- [ ] 페이지 번호 ↔ 텍스트 매핑 구조 저장
-- [ ] 파일 크기 제한 (10MB) + 텍스트 PDF 검증
-- [ ] 업로드 후 원본 파일 자동 삭제 (저작권 보호)
+- [x] PDF 업로드 + 카드 생성 통합 엔드포인트 (`POST /api/v1/generate`)
+- [x] pdfplumber로 페이지별 텍스트 추출
+- [x] 페이지 번호 ↔ 텍스트 매핑 구조 저장
+- [x] 파일 크기 제한 (10MB) + 텍스트 PDF 검증
 
 ### 카드 생성 (Claude API)
-- [ ] 카드 생성 엔드포인트 (`POST /api/v1/generate`)
-- [ ] Claude 프롬프트 설계:
-  - 입력: 페이지별 텍스트 + 템플릿 타입
-  - 출력: 카드 배열 (앞면/뒷면/근거/태그)
-  - 규칙: 근거 불확실하면 카드 미생성
-- [ ] 템플릿 3종 지원: 정의형 / 빈칸형(Cloze) / 비교형
-- [ ] 응답 파싱 → Pydantic 모델 검증
-- [ ] 생성 결과 SQLite 저장 (세션 ID 기반)
+- [x] Claude Sonnet 4.5 프롬프트 설계 (근거 필수, 페이지 번호 포함)
+- [x] 템플릿 3종 지원: 정의형 / 빈칸형(Cloze) / 비교형
+- [x] 응답 파싱 → 필수 필드 검증
+- [x] 생성 결과 SQLite 저장 (세션 ID 기반)
+- [x] 긴 PDF 청크 분할 + 병렬 처리 (5페이지씩)
 
 ### 카드 조회/관리
-- [ ] 카드 목록 조회 (`GET /api/v1/sessions/{id}`)
-- [ ] 카드 상태 업데이트 (`PATCH /api/v1/cards/{id}`) — 채택/삭제/수정
-- [ ] CSV 다운로드 (`GET /api/v1/sessions/{id}/download`) — Anki 임포트 포맷
+- [x] 세션 목록 조회 (`GET /api/v1/sessions`)
+- [x] 세션 상세 조회 (`GET /api/v1/sessions/{id}`)
+- [x] 세션 삭제 (`DELETE /api/v1/sessions/{id}`)
+- [x] 카드 상태 업데이트 (`PATCH /api/v1/cards/{id}`) — 채택/삭제/수정
+- [x] 전체 채택 (`POST /api/v1/sessions/{id}/accept-all`)
 
 ### 데이터 모델
-- [ ] `Session` — id, created_at, filename, page_count, status
-- [ ] `Card` — id, session_id, front, back, evidence, page_num, tags, status(accepted/rejected/pending), template_type
+- [x] `Session` — id, created_at, filename, page_count, template_type, status
+- [x] `Card` — id, session_id, front, back, evidence, evidence_page, tags, status, template_type
 
 ---
 
-## Day 2: 프론트엔드 (UI)
+## Day 2: 프론트엔드 (Flutter) ✅ 완료
 
 ### 프로젝트 세팅
-- [ ] Next.js 14 프로젝트 생성 (`front/`)
-- [ ] Tailwind CSS 설정
-- [ ] API 클라이언트 (`lib/api.ts`)
-- [ ] 다크 모드 기본 설정
+- [x] Flutter 프로젝트 생성 (`front/`)
+- [x] 크로스플랫폼: Web + Android + iOS
+- [x] API 클라이언트 (`services/api_service.dart`)
+- [x] 다크/라이트 모드 테마 (`config/theme.dart`)
+- [x] 눈 피로감 최소 팔레트 (민트 #C2E7DA + 블루 #6290C3 + 남색 #1A1B41)
 
-### 랜딩 페이지 (`/`)
-- [ ] 히어로: 한 줄 카피 + PDF 업로드 영역
-- [ ] 드래그앤드롭 PDF 업로드 UI
-- [ ] 템플릿 선택 (정의/빈칸/비교 — 라디오 또는 칩)
-- [ ] "카드 만들기" 버튼 → 로딩 → 결과 페이지 이동
-- [ ] 로딩 상태 (프로그레스 바 또는 스피너 + 안내 문구)
+### 홈 화면 (`home_screen.dart`)
+- [x] 로고 + 타이틀 + 설명
+- [x] PDF 파일 선택 (file_picker, 웹/모바일 호환)
+- [x] 템플릿 선택 (정의/빈칸/비교 — 탭 UI)
+- [x] "카드 만들기" 버튼 → 로딩 → 결과 페이지 이동
+- [x] 로딩 상태 (스피너 + "약 15~30초 소요" 안내)
+- [x] 다크/라이트 모드 토글 (우상단)
+- [x] 이전 기록 목록 (최근 10개, 삭제 가능)
 
-### 결과/검수 페이지 (`/s/{sessionId}`)
-- [ ] 카드 리스트 뷰 (앞면 / 뒷면 / 근거 표시)
-- [ ] 카드별 액션 버튼: ✅ 채택 / ❌ 삭제 / ✏️ 수정
-- [ ] 수정 시 인라인 에디팅 (앞면/뒷면)
-- [ ] 근거 하이라이트 (페이지 번호 + 원문 스니펫)
-- [ ] 상단 요약: 총 N장 / 채택 N장 / 삭제 N장
-- [ ] "CSV 다운로드" 버튼 (채택된 카드만)
-- [ ] 카드 뒤집기 인터랙션 (탭/클릭으로 앞↔뒤)
+### 리뷰 화면 (`review_screen.dart`)
+- [x] 카드 리스트 뷰 (앞면/뒷면/근거 표시)
+- [x] 카드별 액션: 채택 / 삭제 / 수정 / 되돌리기
+- [x] 수정 시 인라인 에디팅 (앞면/뒷면)
+- [x] 근거 토글 (페이지 번호 + 원문 스니펫)
+- [x] 상단 통계: 전체 / 대기 / 채택 / 삭제
+- [x] 필터 칩 (전체/대기/채택/삭제)
+- [x] 전체 채택 버튼
+- [x] 학습하기 버튼
 
-### 공통 컴포넌트
-- [ ] 반응형 레이아웃 (모바일 420px 기준)
-- [ ] Navbar (로고 + 다크모드 토글)
-- [ ] 에러 상태 UI (업로드 실패, 생성 실패 등)
-- [ ] 빈 상태 UI (카드 0장일 때)
+### 학습 화면 (`study_screen.dart`)
+- [x] 풀스크린 플래시카드 (탭하여 앞/뒤 전환)
+- [x] 랜덤 셔플 + 다시 섞기 버튼
+- [x] 좌우 스와이프로 이전/다음
+- [x] 진행률 바 (3/15)
+- [x] 근거 보기 토글
+- [x] 마지막 카드에서 "완료" 버튼
+
+### 공통
+- [x] 에러 상태 UI (업로드 실패, 생성 실패, 연결 실패)
+- [x] 빈 상태 UI (카드 0장)
+- [x] Android cleartext 허용 (로컬 테스트용)
+- [x] 웹 file_picker 호환 (bytes vs path)
+
+---
+
+## Day 2.5: 빌드 + 테스트 ✅ 완료
+
+### 빌드
+- [x] Flutter 웹 빌드 + Chrome 테스트
+- [x] Android APK 빌드 (release, 48.9MB)
+- [x] Android Studio + SDK 36 + Java 21 설정
+- [x] 로컬 IP 네트워크 테스트 (Mac → Android 폰)
+
+### 버그 수정
+- [x] 웹 file_picker `path` 에러 수정 (kIsWeb 분기)
+- [x] 다운로드 한국어 파일명 인코딩 에러 수정 (RFC 5987)
+- [x] FilledButton infinite width 에러 수정 (minimumSize override)
+- [x] 카드 편집 모드 UI 겹침 수정 (액션 버튼 숨김)
+- [x] AnimatedCrossFade 텍스트 겹침 수정 (단순 조건부 렌더링)
 
 ---
 
 ## Day 3: 마무리 + 배포
 
 ### UX 마무리
-- [ ] 미리보기 5장 먼저 표시 (가치 체감 포인트)
-- [ ] 로딩 중 예상 시간 안내 ("약 15초 소요")
-- [ ] 토스트/알림 (다운로드 완료, 카드 삭제 등)
-- [ ] 빈칸형 카드의 빈칸 스타일링 (`___` → 하이라이트)
-- [ ] 모바일 터치 UX 확인 (스와이프, 버튼 크기)
+- [ ] 빈칸형 카드의 빈칸 스타일링 (`_____` → 하이라이트)
+- [ ] 토스트/알림 일관성 (삭제, 채택 등)
+- [ ] 모바일 터치 UX 세밀 확인 (버튼 크기, 스와이프)
+- [ ] 앱 아이콘 커스텀 (현재 Flutter 기본 아이콘)
 
 ### 배포
 - [ ] 백엔드: EC2 Docker Compose 배포 (기존 인프라 활용)
-- [ ] 프론트: Vercel 배포
-- [ ] 도메인 설정 (decard.eupori.dev 또는 별도 도메인)
+- [ ] 프론트: Vercel 웹 배포 (또는 별도 도메인)
+- [ ] 도메인 설정 (decard.eupori.dev 또는 별도)
 - [ ] HTTPS 확인
-- [ ] 기본 에러 모니터링 (Sentry 연동 — 기존 설정 재활용)
+- [ ] API URL을 프로덕션으로 변경 (환경변수화)
 
 ### 테스트
 - [ ] 텍스트 PDF 3종 테스트 (강의자료, 교재, 필기)
 - [ ] 카드 생성 품질 확인 (근거 정확성, 템플릿별)
-- [ ] 검수 플로우 전체 테스트 (업로드→생성→검수→다운로드)
-- [ ] 모바일 브라우저 테스트 (Chrome, Safari)
-- [ ] CSV → Anki 임포트 테스트
+- [ ] 전체 플로우 E2E 테스트 (업로드→생성→검수→학습)
+- [ ] 모바일 앱 최종 테스트
 
 ### 배포 후
 - [ ] 공유 링크 생성 (지아현 + 테스터 배포용)
-- [ ] 간단한 피드백 수집 방법 준비 (구글 폼 또는 카톡)
+- [ ] 피드백 수집 방법 준비 (구글 폼 또는 카톡)
+- [ ] Google Play Store 등록 준비 (앱 이름, 설명, 스크린샷)
+
+---
+
+## 변경 사항 (원래 계획 대비)
+
+| 원래 | 변경 | 이유 |
+|------|------|------|
+| Next.js 프론트 | Flutter | 앱(Android/iOS) + 웹 동시 지원 |
+| CSV 다운로드 (Anki) | 앱 내 학습 모드 | 외부 앱 의존성 제거, 자체 학습 기능 |
+| 드래그앤드롭 업로드 | 탭 업로드 | 모바일 우선 UX |
+| 코스 패스 결제 | 이후 | MVP는 무료 |
 
 ---
 
@@ -107,25 +144,26 @@
 |------|------|------|
 | 로그인/회원가입 | 검증 단계에서 불필요 | 2주차 |
 | 결제 시스템 | 무료로 써보게 한 후 판단 | 5-6주차 |
-| .apkg 포맷 | CSV면 Anki 임포트 가능 | 3-4주차 |
+| 이력 페이지 | 홈 화면 10개 리스트로 충분 | 3-4주차 |
 | 코스/워크스페이스 | 단일 업로드로 충분 | 3-4주차 |
 | 중복 카드 감지 | 후순위 | 3-4주차 |
 | OCR (스캔 PDF) | 텍스트 PDF만 지원 | 7주차+ |
-| 비동기 큐 | 동기 처리로 충분 | 필요 시 |
-| 네이티브 앱 | 웹 먼저 | 7-9주차 |
+| SRS 반복학습 | 단순 플래시카드로 시작 | 3-4주차 |
 | 덱 공유/마켓 | 저작권 리스크 | 검토 후 |
+| iOS 앱스토어 | Xcode 필요, 후순위 | 3-4주차 |
 
 ---
 
-## 기술 스택
+## 기술 스택 (실제)
 
 | 구분 | 선택 | 비고 |
 |------|------|------|
-| 프론트 | Next.js 14 (App Router) + Tailwind | Vercel 배포 |
-| 백엔드 | FastAPI + pdfplumber | EC2 배포 |
-| AI | Claude Sonnet 4.5 | 근거 추출 정확도 |
-| DB | SQLite | MVP 충분, 나중에 PostgreSQL |
-| 파일 | 임시 저장 후 삭제 | 저작권 보호 |
+| 프론트 | Flutter 3.41.1 | Web + Android + iOS |
+| 백엔드 | FastAPI + pdfplumber | uvicorn --reload |
+| AI | Claude Sonnet 4.5 | 청크 병렬 처리 |
+| DB | SQLite | SQLAlchemy ORM |
+| 테마 | Material 3 | 다크/라이트, 민트 팔레트 |
+| 폰트 | Noto Sans KR (Google Fonts) | |
 
 ---
 

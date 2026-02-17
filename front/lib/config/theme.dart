@@ -2,45 +2,56 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
-  // 팔레트 (Coolors)
-  static const Color primary = Color(0xFFC2E7DA); // Frozen Water — 민트
-  static const Color secondary = Color(0xFF6290C3); // Dusty Denim — 블루
-  static const Color dark = Color(0xFF1A1B41); // Space Indigo — 남색
+  // 팔레트 (Coolors) — 눈 피로감 최소화
+  static const Color mint = Color(0xFFC2E7DA); // Frozen Water — 민트
+  static const Color blue = Color(0xFF6290C3); // Dusty Denim — 블루
+  static const Color navy = Color(0xFF1A1B41); // Space Indigo — 남색
+
+  // 라이트 전용 색상
+  static const Color _lightBg = Color(0xFFE8F0EC); // 민트 틴트 배경 (눈에 띄게)
+  static const Color _lightSurface = Color(0xFFF7FAF8); // 카드: 약간 민트 흰색
+  static const Color _lightBorder = Color(0xFFCBDDD3); // 민트 계열 테두리
 
   static ThemeData get light {
     final colorScheme = ColorScheme.fromSeed(
-      seedColor: secondary,
+      seedColor: blue,
       brightness: Brightness.light,
-      primary: secondary,
-      primaryContainer: primary,
-      onPrimaryContainer: dark,
-      surface: Colors.white,
-      surfaceContainerLow: primary.withValues(alpha: 0.15),
+      primary: blue,
+      primaryContainer: mint,
+      onPrimaryContainer: navy,
+      surface: _lightSurface,
+      surfaceContainerLow: const Color(0xFFDAEBE2), // 민트 틴트 (헤더/섹션)
+      onSurface: navy,
+      onSurfaceVariant: const Color(0xFF4A5568), // 부제/보조 텍스트
+      outline: _lightBorder,
+      outlineVariant: _lightBorder,
     );
 
     return ThemeData(
       useMaterial3: true,
       colorScheme: colorScheme,
       brightness: Brightness.light,
-      scaffoldBackgroundColor: Colors.white,
+      scaffoldBackgroundColor: _lightBg,
       textTheme: GoogleFonts.notoSansKrTextTheme(),
       appBarTheme: AppBarTheme(
         centerTitle: true,
         elevation: 0,
-        backgroundColor: Colors.white,
-        foregroundColor: dark,
+        backgroundColor: _lightBg,
+        foregroundColor: navy,
+        surfaceTintColor: Colors.transparent,
       ),
       cardTheme: CardThemeData(
         elevation: 0,
+        color: _lightSurface,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: Colors.grey.shade200),
+          side: const BorderSide(color: _lightBorder),
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           minimumSize: const Size(double.infinity, 52),
-          backgroundColor: secondary,
+          backgroundColor: blue,
           foregroundColor: Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
@@ -50,11 +61,20 @@ class AppTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           minimumSize: const Size(0, 44),
-          foregroundColor: secondary,
-          side: BorderSide(color: secondary),
+          foregroundColor: blue,
+          side: const BorderSide(color: blue),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
+        ),
+      ),
+      dividerTheme: const DividerThemeData(color: _lightBorder),
+      chipTheme: ChipThemeData(
+        backgroundColor: const Color(0xFFEBF3EF),
+        selectedColor: mint,
+        side: const BorderSide(color: _lightBorder),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
         ),
       ),
     );
@@ -62,12 +82,15 @@ class AppTheme {
 
   static ThemeData get darkTheme {
     final colorScheme = ColorScheme.fromSeed(
-      seedColor: secondary,
+      seedColor: blue,
       brightness: Brightness.dark,
-      primary: secondary,
-      primaryContainer: dark,
+      primary: blue,
+      primaryContainer: navy,
       surface: const Color(0xFF121212),
-      surfaceContainerLow: dark,
+      surfaceContainerLow: const Color(0xFF1A1B2E), // navy 계열 어두운 톤
+      onSurfaceVariant: const Color(0xFF9CA3AF),
+      outline: const Color(0xFF2D3748),
+      outlineVariant: const Color(0xFF2D3748),
     );
 
     return ThemeData(
@@ -81,18 +104,19 @@ class AppTheme {
       appBarTheme: const AppBarTheme(
         centerTitle: true,
         elevation: 0,
+        surfaceTintColor: Colors.transparent,
       ),
       cardTheme: CardThemeData(
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: Colors.grey.shade800),
+          side: const BorderSide(color: Color(0xFF2D3748)),
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           minimumSize: const Size(double.infinity, 52),
-          backgroundColor: secondary,
+          backgroundColor: blue,
           foregroundColor: Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
@@ -102,11 +126,20 @@ class AppTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           minimumSize: const Size(0, 44),
-          foregroundColor: primary,
-          side: BorderSide(color: secondary),
+          foregroundColor: mint,
+          side: const BorderSide(color: blue),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
+        ),
+      ),
+      dividerTheme: const DividerThemeData(color: Color(0xFF2D3748)),
+      chipTheme: ChipThemeData(
+        backgroundColor: const Color(0xFF1A1B2E),
+        selectedColor: navy,
+        side: const BorderSide(color: Color(0xFF2D3748)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
         ),
       ),
     );
@@ -116,5 +149,5 @@ class AppTheme {
   static const Color acceptedColor = Color(0xFF22C55E);
   static const Color rejectedColor = Color(0xFFEF4444);
   static const Color pendingColor = Color(0xFFF59E0B);
-  static const Color evidenceColor = Color(0xFF6290C3); // secondary와 동일
+  static const Color evidenceColor = Color(0xFF6290C3);
 }

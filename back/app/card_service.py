@@ -107,8 +107,8 @@ def _parse_cards_json(text: str) -> List[Dict]:
     return json.loads(content[start:end + 1])
 
 
-async def generate_cards(pages: List[Dict], template_type: str = "definition") -> List[Dict]:
-    """PDF 텍스트에서 Claude를 이용해 암기카드를 생성합니다."""
+async def _generate_chunk(pages: List[Dict], template_type: str) -> List[Dict]:
+    """페이지 청크 하나에 대해 카드를 생성합니다."""
     system_prompt = _build_system_prompt(template_type)
     user_prompt = _build_user_prompt(pages)
 
@@ -122,7 +122,6 @@ async def generate_cards(pages: List[Dict], template_type: str = "definition") -
     raw_text = response.content[0].text
     cards_raw = _parse_cards_json(raw_text)
 
-    # 필수 필드 검증
     validated = []
     for card in cards_raw:
         if not all(k in card for k in ("front", "back", "evidence", "evidence_page")):
@@ -137,7 +136,35 @@ async def generate_cards(pages: List[Dict], template_type: str = "definition") -
             "template_type": template_type,
         })
 
-    if not validated:
+    return validated
+
+
+import asyncio
+
+CHUNK_SIZE = 5  # 5페이지씩 분할
+
+
+async def generate_cards(pages: List[Dict], template_type: str = "definition") -> List[Dict]:
+    """PDF 텍스트에서 Claude를 이용해 암기카드를 생성합니다. 청크 병렬 처리."""
+    if len(pages) <= CHUNK_SIZE:
+        # 짧은 PDF는 그냥 한번에
+        result = await _generate_chunk(pages, template_type)
+    else:
+        # 긴 PDF는 청크로 나눠서 병렬 호출
+        chunks = [pages[i:i + CHUNK_SIZE] for i in range(0, len(pages), CHUNK_SIZE)]
+        logger.info("PDF %d페이지 → %d청크 병렬 처리", len(pages), len(chunks))
+
+        tasks = [_generate_chunk(chunk, template_type) for chunk in chunks]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        result = []
+        for r in results:
+            if isinstance(r, Exception):
+                logger.warning("청크 처리 실패: %s", r)
+                continue
+            result.extend(r)
+
+    if not result:
         raise ValueError("생성된 카드가 없습니다. PDF 내용을 확인해주세요.")
 
-    return validated
+    return result

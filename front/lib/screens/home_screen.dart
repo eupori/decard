@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import '../main.dart' show themeNotifier;
 import '../models/session_model.dart';
 import '../services/api_service.dart';
 import 'review_screen.dart';
@@ -22,6 +23,9 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isLoading = false;
   String? _error;
 
+  List<Map<String, dynamic>> _sessions = [];
+  bool _sessionsLoading = true;
+
   final _templateOptions = [
     ('definition', '정의형', 'OO란? 형태의 Q&A', Icons.menu_book_rounded),
     ('cloze', '빈칸형', '핵심 키워드 빈칸 채우기', Icons.edit_note_rounded),
@@ -32,16 +36,64 @@ class _HomeScreenState extends State<HomeScreen> {
       _selectedFileName != null &&
       (_selectedFilePath != null || _selectedFileBytes != null);
 
+  @override
+  void initState() {
+    super.initState();
+    _loadSessions();
+  }
+
+  Future<void> _loadSessions() async {
+    try {
+      final sessions = await ApiService.listSessions();
+      if (mounted) setState(() => _sessions = sessions);
+    } catch (_) {
+      // 실패해도 무시
+    } finally {
+      if (mounted) setState(() => _sessionsLoading = false);
+    }
+  }
+
+  Future<void> _openSession(String sessionId) async {
+    setState(() => _isLoading = true);
+    try {
+      final session = await ApiService.getSession(sessionId);
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => ReviewScreen(session: session)),
+      ).then((_) => _loadSessions());
+    } on ApiException catch (e) {
+      setState(() => _error = e.message);
+    } catch (e) {
+      setState(() => _error = '오류가 발생했습니다: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _deleteSession(String sessionId) async {
+    try {
+      await ApiService.deleteSession(sessionId);
+      setState(() => _sessions.removeWhere((s) => s['id'] == sessionId));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('삭제 실패: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _pickFile() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['pdf'],
-      withData: kIsWeb, // 웹에서는 바이트로 읽기
+      withData: kIsWeb,
     );
 
     if (result != null) {
       setState(() {
-        _selectedFilePath = result.files.single.path;
+        _selectedFilePath = kIsWeb ? null : result.files.single.path;
         _selectedFileName = result.files.single.name;
         _selectedFileBytes = result.files.single.bytes;
         _error = null;
@@ -80,10 +132,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
       Navigator.push(
         context,
-        MaterialPageRoute(
-          builder: (_) => ReviewScreen(session: session),
-        ),
-      );
+        MaterialPageRoute(builder: (_) => ReviewScreen(session: session)),
+      ).then((_) => _loadSessions());
     } on ApiException catch (e) {
       setState(() => _error = e.message);
     } catch (e) {
@@ -146,7 +196,27 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: 24),
+          // 다크모드 토글
+          Align(
+            alignment: Alignment.centerRight,
+            child: ValueListenableBuilder<ThemeMode>(
+              valueListenable: themeNotifier,
+              builder: (context, mode, _) {
+                final isDark = mode == ThemeMode.dark;
+                return IconButton(
+                  onPressed: () {
+                    themeNotifier.value =
+                        isDark ? ThemeMode.light : ThemeMode.dark;
+                  },
+                  icon: Icon(
+                    isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                    color: cs.onSurfaceVariant,
+                  ),
+                  tooltip: isDark ? '라이트 모드' : '다크 모드',
+                );
+              },
+            ),
+          ),
 
           // 로고 + 타이틀
           Center(
@@ -159,7 +229,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     color: cs.primaryContainer,
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: Icon(Icons.style_rounded, size: 32, color: cs.primary),
+                  child:
+                      Icon(Icons.style_rounded, size: 32, color: cs.primary),
                 ),
                 const SizedBox(height: 16),
                 Text(
@@ -288,9 +359,106 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
 
           const SizedBox(height: 40),
+
+          // 이전 기록 (최대 10개)
+          if (_sessions.isNotEmpty) ...[
+            Text(
+              '이전 기록',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 12),
+
+            for (final s in _sessions.take(10)) _buildSessionItem(cs, s),
+
+            const SizedBox(height: 24),
+          ],
         ],
       ),
     );
+  }
+
+  Widget _buildSessionItem(ColorScheme cs, Map<String, dynamic> session) {
+    final filename = (session['filename'] as String).replaceAll('.pdf', '');
+    final cardCount = session['card_count'] as int;
+    final templateType = session['template_type'] as String;
+    final createdAt = DateTime.tryParse(session['created_at'] as String);
+    final timeAgo = createdAt != null ? _formatTimeAgo(createdAt) : '';
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        onTap: () => _openSession(session['id'] as String),
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            border: Border.all(color: cs.outlineVariant),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.description_outlined,
+                  size: 24, color: cs.onSurfaceVariant),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      filename,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${_templateLabel(templateType)} · ${cardCount}장 · $timeAgo',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: cs.onSurfaceVariant,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                onPressed: () => _deleteSession(session['id'] as String),
+                icon: Icon(Icons.close_rounded,
+                    size: 18, color: cs.onSurfaceVariant),
+                tooltip: '삭제',
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _formatTimeAgo(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inMinutes < 1) return '방금 전';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}분 전';
+    if (diff.inHours < 24) return '${diff.inHours}시간 전';
+    if (diff.inDays < 7) return '${diff.inDays}일 전';
+    return '${dt.month}/${dt.day}';
+  }
+
+  String _templateLabel(String type) {
+    switch (type) {
+      case 'definition':
+        return '정의형';
+      case 'cloze':
+        return '빈칸형';
+      case 'comparison':
+        return '비교형';
+      default:
+        return type;
+    }
   }
 
   Widget _buildTemplateOption(

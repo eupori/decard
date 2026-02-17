@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../config/theme.dart';
 import '../models/session_model.dart';
 import '../models/card_model.dart';
 import '../services/api_service.dart';
 import '../widgets/flash_card_item.dart';
+import 'study_screen.dart';
 
 class ReviewScreen extends StatefulWidget {
   final SessionModel session;
@@ -69,11 +69,23 @@ class _ReviewScreenState extends State<ReviewScreen> {
     }
   }
 
-  Future<void> _download() async {
-    final url = ApiService.getDownloadUrl(widget.session.id);
-    if (await canLaunchUrl(Uri.parse(url))) {
-      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  void _startStudy() {
+    final studyCards = _cards.where((c) => !c.isRejected).toList();
+    if (studyCards.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('학습할 카드가 없습니다.')),
+      );
+      return;
     }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => StudyScreen(
+          cards: studyCards,
+          title: widget.session.filename.replaceAll('.pdf', ''),
+        ),
+      ),
+    );
   }
 
   @override
@@ -89,9 +101,9 @@ class _ReviewScreenState extends State<ReviewScreen> {
         ),
         actions: [
           IconButton(
-            onPressed: _download,
-            icon: const Icon(Icons.download_rounded),
-            tooltip: 'CSV 다운로드',
+            onPressed: _startStudy,
+            icon: const Icon(Icons.school_rounded),
+            tooltip: '학습하기',
           ),
         ],
       ),
@@ -104,7 +116,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
           _buildFilterChips(cs),
 
           // 액션 바
-          if (_pendingCount > 0) _buildActionBar(cs),
+          _buildActionBar(cs),
 
           // 카드 리스트
           Expanded(
@@ -212,19 +224,21 @@ class _ReviewScreenState extends State<ReviewScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Row(
         children: [
-          Expanded(
-            child: OutlinedButton.icon(
-              onPressed: _acceptAll,
-              icon: const Icon(Icons.check_circle_outline, size: 18),
-              label: Text('전체 채택 ($_pendingCount장)'),
+          if (_pendingCount > 0) ...[
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _acceptAll,
+                icon: const Icon(Icons.check_circle_outline, size: 18),
+                label: Text('전체 채택 ($_pendingCount장)'),
+              ),
             ),
-          ),
-          const SizedBox(width: 12),
+            const SizedBox(width: 12),
+          ],
           Expanded(
             child: FilledButton.icon(
-              onPressed: _acceptedCount > 0 ? _download : null,
-              icon: const Icon(Icons.download_rounded, size: 18),
-              label: Text('다운로드 ($_acceptedCount장)'),
+              onPressed: _startStudy,
+              icon: const Icon(Icons.school_rounded, size: 18),
+              label: const Text('학습하기'),
             ),
           ),
         ],

@@ -110,9 +110,29 @@ class ApiService {
     return data['accepted'] as int;
   }
 
-  /// 다운로드 URL 반환
-  static String getDownloadUrl(String sessionId) {
-    return ApiConfig.downloadUrl(sessionId);
+  /// 세션 목록 조회
+  static Future<List<Map<String, dynamic>>> listSessions() async {
+    final response = await http.get(
+      Uri.parse(ApiConfig.sessionsUrl),
+    );
+
+    if (response.statusCode != 200) {
+      throw ApiException('세션 목록을 불러올 수 없습니다.', response.statusCode);
+    }
+
+    final list = jsonDecode(response.body) as List;
+    return list.cast<Map<String, dynamic>>();
+  }
+
+  /// 세션 삭제
+  static Future<void> deleteSession(String sessionId) async {
+    final response = await http.delete(
+      Uri.parse(ApiConfig.sessionUrl(sessionId)),
+    );
+
+    if (response.statusCode != 200) {
+      throw ApiException('삭제에 실패했습니다.', response.statusCode);
+    }
   }
 }
 

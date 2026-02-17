@@ -75,6 +75,46 @@ async def generate(
 
 
 # ──────────────────────────────────────
+# GET /api/v1/sessions — 세션 목록
+# ──────────────────────────────────────
+
+@router.get("/sessions")
+def list_sessions(db: Session = Depends(get_db)):
+    sessions = (
+        db.query(SessionModel)
+        .filter(SessionModel.status == "completed")
+        .order_by(SessionModel.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    return [
+        {
+            "id": s.id,
+            "filename": s.filename,
+            "page_count": s.page_count,
+            "template_type": s.template_type,
+            "card_count": len(s.cards),
+            "created_at": s.created_at.isoformat(),
+        }
+        for s in sessions
+    ]
+
+
+# ──────────────────────────────────────
+# DELETE /api/v1/sessions/{id} — 세션 삭제
+# ──────────────────────────────────────
+
+@router.delete("/sessions/{session_id}")
+def delete_session(session_id: str, db: Session = Depends(get_db)):
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(404, "세션을 찾을 수 없습니다.")
+    db.delete(session)
+    db.commit()
+    return {"deleted": session_id}
+
+
+# ──────────────────────────────────────
 # GET /api/v1/sessions/{id} — 세션 조회
 # ──────────────────────────────────────
 
@@ -159,10 +199,16 @@ def download_csv(session_id: str, db: Session = Depends(get_db)):
     safe_name = session.filename.replace(".pdf", "").replace(" ", "_")
     filename = f"decard_{safe_name}_{session.template_type}.txt"
 
+    # RFC 5987: 한국어 파일명을 UTF-8로 인코딩
+    from urllib.parse import quote
+    encoded_filename = quote(filename)
+
     return StreamingResponse(
         io.BytesIO(output.getvalue().encode("utf-8-sig")),
         media_type="text/tab-separated-values",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}",
+        },
     )
 
 

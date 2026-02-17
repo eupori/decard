@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'config/theme.dart';
 import 'screens/home_screen.dart';
 
+final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.dark);
+
 void main() {
   runApp(const DecardApp());
 }
@@ -11,13 +13,18 @@ class DecardApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: '데카드',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.light,
-      darkTheme: AppTheme.darkTheme,
-      themeMode: ThemeMode.system,
-      home: const HomeScreen(),
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: themeNotifier,
+      builder: (context, mode, _) {
+        return MaterialApp(
+          title: '데카드',
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.light,
+          darkTheme: AppTheme.darkTheme,
+          themeMode: mode,
+          home: const HomeScreen(),
+        );
+      },
     );
   }
 }
