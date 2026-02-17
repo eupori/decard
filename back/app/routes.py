@@ -1,0 +1,203 @@
+import csv
+import io
+import logging
+
+from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
+
+from .config import settings
+from .database import get_db
+from .models import (
+    SessionModel, CardModel,
+    CardResponse, CardUpdate, SessionResponse,
+)
+from .pdf_service import extract_text_from_pdf, validate_pdf
+from .card_service import generate_cards
+
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/api/v1")
+
+
+# ──────────────────────────────────────
+# POST /api/v1/generate — PDF 업로드 + 카드 생성
+# ──────────────────────────────────────
+
+@router.post("/generate")
+async def generate(
+    file: UploadFile = File(...),
+    template_type: str = Form("definition"),
+    db: Session = Depends(get_db),
+):
+    if template_type not in ("definition", "cloze", "comparison"):
+        raise HTTPException(400, "지원하지 않는 템플릿입니다. (definition / cloze / comparison)")
+
+    content = await file.read()
+
+    # PDF 검증
+    valid, error = validate_pdf(content, settings.MAX_PDF_SIZE_MB)
+    if not valid:
+        raise HTTPException(400, error)
+
+    # 텍스트 추출
+    pages = extract_text_from_pdf(content)
+    if len(pages) > settings.MAX_PAGES:
+        raise HTTPException(400, f"페이지 수가 {settings.MAX_PAGES}페이지를 초과합니다.")
+
+    # 세션 생성
+    session = SessionModel(
+        filename=file.filename or "unknown.pdf",
+        page_count=len(pages),
+        template_type=template_type,
+        status="processing",
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+
+    try:
+        cards_data = await generate_cards(pages, template_type)
+
+        for card_data in cards_data:
+            db.add(CardModel(session_id=session.id, **card_data))
+
+        session.status = "completed"
+        db.commit()
+        db.refresh(session)
+
+        return _build_session_response(session)
+
+    except Exception as e:
+        logger.exception("카드 생성 실패: session=%s", session.id)
+        session.status = "failed"
+        db.commit()
+        raise HTTPException(500, f"카드 생성에 실패했습니다: {e}")
+
+
+# ──────────────────────────────────────
+# GET /api/v1/sessions/{id} — 세션 조회
+# ──────────────────────────────────────
+
+@router.get("/sessions/{session_id}")
+def get_session(session_id: str, db: Session = Depends(get_db)):
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(404, "세션을 찾을 수 없습니다.")
+    return _build_session_response(session)
+
+
+# ──────────────────────────────────────
+# PATCH /api/v1/cards/{id} — 카드 상태/내용 수정
+# ──────────────────────────────────────
+
+@router.patch("/cards/{card_id}")
+def update_card(card_id: str, update: CardUpdate, db: Session = Depends(get_db)):
+    card = db.query(CardModel).filter(CardModel.id == card_id).first()
+    if not card:
+        raise HTTPException(404, "카드를 찾을 수 없습니다.")
+
+    if update.status and update.status in ("accepted", "rejected", "pending"):
+        card.status = update.status
+    if update.front is not None:
+        card.front = update.front
+    if update.back is not None:
+        card.back = update.back
+
+    db.commit()
+    db.refresh(card)
+
+    return _card_to_response(card)
+
+
+# ──────────────────────────────────────
+# POST /api/v1/sessions/{id}/accept-all — 전체 채택
+# ──────────────────────────────────────
+
+@router.post("/sessions/{session_id}/accept-all")
+def accept_all(session_id: str, db: Session = Depends(get_db)):
+    cards = db.query(CardModel).filter(
+        CardModel.session_id == session_id,
+        CardModel.status == "pending",
+    ).all()
+    for card in cards:
+        card.status = "accepted"
+    db.commit()
+    return {"accepted": len(cards)}
+
+
+# ──────────────────────────────────────
+# GET /api/v1/sessions/{id}/download — CSV 다운로드
+# ──────────────────────────────────────
+
+@router.get("/sessions/{session_id}/download")
+def download_csv(session_id: str, db: Session = Depends(get_db)):
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+    if not session:
+        raise HTTPException(404, "세션을 찾을 수 없습니다.")
+
+    # 채택 카드 우선, 없으면 pending 포함
+    cards = db.query(CardModel).filter(
+        CardModel.session_id == session_id,
+        CardModel.status.in_(["accepted", "pending"]),
+    ).all()
+
+    if not cards:
+        raise HTTPException(404, "다운로드할 카드가 없습니다.")
+
+    # Anki 임포트 포맷 (TSV: 앞면 \t 뒷면 \t 태그)
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter="\t")
+
+    for card in cards:
+        back_with_evidence = (
+            f"{card.back}\n\n"
+            f"📖 근거 (p.{card.evidence_page}): {card.evidence}"
+        )
+        writer.writerow([card.front, back_with_evidence, card.tags])
+
+    output.seek(0)
+    safe_name = session.filename.replace(".pdf", "").replace(" ", "_")
+    filename = f"decard_{safe_name}_{session.template_type}.txt"
+
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode("utf-8-sig")),
+        media_type="text/tab-separated-values",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ──────────────────────────────────────
+# Helpers
+# ──────────────────────────────────────
+
+def _card_to_response(card: CardModel) -> dict:
+    return CardResponse(
+        id=card.id,
+        front=card.front,
+        back=card.back,
+        evidence=card.evidence,
+        evidence_page=card.evidence_page,
+        tags=card.tags,
+        template_type=card.template_type,
+        status=card.status,
+    ).model_dump()
+
+
+def _build_session_response(session: SessionModel) -> dict:
+    cards = [_card_to_response(c) for c in session.cards]
+    stats = {
+        "total": len(cards),
+        "accepted": sum(1 for c in cards if c["status"] == "accepted"),
+        "rejected": sum(1 for c in cards if c["status"] == "rejected"),
+        "pending": sum(1 for c in cards if c["status"] == "pending"),
+    }
+    return {
+        "id": session.id,
+        "filename": session.filename,
+        "page_count": session.page_count,
+        "template_type": session.template_type,
+        "status": session.status,
+        "created_at": session.created_at.isoformat(),
+        "cards": cards,
+        "stats": stats,
+    }
