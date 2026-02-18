@@ -1,24 +1,35 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_DIR="/opt/decard"
+APP_DIR="$HOME/apps/decard"
+NGINX_CONF_DIR="$HOME/apps/fridge-recipe/back/nginx/conf.d"
 
 echo "=== Decard Deploy ==="
 
-# Pull latest code
-cd "$PROJECT_DIR"
+# 1. Pull latest code
+cd "$APP_DIR"
 git pull origin master
 
-# Backend
-echo "--- Backend ---"
-cd "$PROJECT_DIR/back"
-source .venv/bin/activate
-pip install -r requirements.txt --quiet
-sudo systemctl restart decard
+# 2. Backend: Docker build + restart
+echo "--- Backend (Docker) ---"
+docker compose build --no-cache
+docker compose up -d
+docker compose ps
 
-# Frontend (web build)
+# 3. Nginx config 복사 + reload
+echo "--- Nginx config ---"
+cp deploy/nginx-decard-api.conf "$NGINX_CONF_DIR/decard-api.conf"
+cp deploy/nginx-decard-web.conf "$NGINX_CONF_DIR/decard-web.conf"
+docker exec back-nginx-1 nginx -t && docker exec back-nginx-1 nginx -s reload
+
+# 4. Frontend: Flutter web 빌드 결과물을 nginx 볼륨에 복사
 echo "--- Frontend (web) ---"
-cd "$PROJECT_DIR/front"
-flutter build web --dart-define=API_BASE_URL=https://decard-api.eupori.dev
+docker exec back-nginx-1 mkdir -p /var/www/decard
+docker cp front/build/web/. back-nginx-1:/var/www/decard/
+
+# 5. Health check
+echo "--- Health check ---"
+sleep 3
+curl -sf http://localhost:8001/health && echo " OK" || echo " FAIL"
 
 echo "=== Deploy complete ==="
