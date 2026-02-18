@@ -22,8 +22,9 @@ async def run_claude(
     if model:
         cmd += ["--model", model]
 
-    # tools 플래그: 빈 문자열이면 도구 비활성화
-    cmd += ["--tools", tools]
+    # tools 플래그: 값이 있을 때만 추가
+    if tools:
+        cmd += ["--tools", tools]
 
     # 중첩 실행 차단 우회: CLAUDE_CODE 관련 env 키 제거
     env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDECODE")}

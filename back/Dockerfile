@@ -19,11 +19,12 @@ RUN pip install --no-cache-dir -r requirements.txt gunicorn
 # App code
 COPY app ./app
 
-# Non-root user
-RUN useradd -r -s /bin/false appuser && chown -R appuser:appuser /app
+# Non-root user with writable home (Claude CLI needs config dir)
+RUN useradd -r -m -s /bin/false appuser && chown -R appuser:appuser /app
 USER appuser
 
 ENV PYTHONPATH="/app"
+ENV HOME="/home/appuser"
 
 EXPOSE 8001
 
