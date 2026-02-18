@@ -13,6 +13,19 @@ from .database import Base
 # SQLAlchemy Models
 # ──────────────────────────────────────
 
+class UserModel(Base):
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True, default=lambda: f"usr_{uuid.uuid4().hex[:10]}")
+    kakao_id = Column(String, unique=True, nullable=False, index=True)
+    nickname = Column(String, default="")
+    profile_image = Column(String, default="")
+    device_id = Column(String, index=True, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    sessions = relationship("SessionModel", back_populates="user")
+
+
 class SessionModel(Base):
     __tablename__ = "sessions"
 
@@ -21,10 +34,12 @@ class SessionModel(Base):
     page_count = Column(Integer, default=0)
     template_type = Column(String, default="definition")
     device_id = Column(String, index=True, default="anonymous")
+    user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
     status = Column(String, default="processing")  # processing / completed / failed
     created_at = Column(DateTime, default=datetime.utcnow)
 
     cards = relationship("CardModel", back_populates="session", cascade="all, delete-orphan")
+    user = relationship("UserModel", back_populates="sessions")
 
 
 class CardModel(Base):
@@ -99,3 +114,10 @@ class GradeResponse(BaseModel):
     score: str
     feedback: str
     model_answer: str
+
+
+class UserResponse(BaseModel):
+    id: str
+    kakao_id: str
+    nickname: str
+    profile_image: str

@@ -34,6 +34,7 @@ def get_db():
 def create_tables():
     Base.metadata.create_all(bind=engine)
     _migrate_device_id()
+    _migrate_users_table()
 
 
 def _migrate_device_id():
@@ -44,3 +45,16 @@ def _migrate_device_id():
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE sessions ADD COLUMN device_id VARCHAR DEFAULT 'anonymous'"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_sessions_device_id ON sessions (device_id)"))
+
+
+def _migrate_users_table():
+    """Create users table + add user_id column to sessions if missing."""
+    insp = inspect(engine)
+
+    # users 테이블은 create_all에서 이미 생성됨 (Base.metadata)
+    # sessions.user_id 컬럼만 마이그레이션
+    columns = [c["name"] for c in insp.get_columns("sessions")]
+    if "user_id" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE sessions ADD COLUMN user_id VARCHAR"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_sessions_user_id ON sessions (user_id)"))

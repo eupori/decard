@@ -7,7 +7,11 @@ import 'package:file_picker/file_picker.dart';
 import '../main.dart' show themeNotifier;
 import '../models/session_model.dart';
 import '../services/api_service.dart';
+import '../services/auth_service.dart';
 import '../utils/snackbar_helper.dart';
+import '../utils/web_auth_stub.dart'
+    if (dart.library.html) '../utils/web_auth.dart' as web_auth;
+import 'login_screen.dart';
 import 'review_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -28,6 +32,10 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Map<String, dynamic>> _sessions = [];
   bool _sessionsLoading = true;
   bool _sessionsError = false;
+
+  // Auth state
+  bool _isLoggedIn = false;
+  Map<String, dynamic>? _user;
 
   // Loading animation
   int _loadingMessageIndex = 0;
@@ -53,6 +61,8 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _handleOAuthCallback();
+    _checkAuthState();
     _loadSessions();
   }
 
@@ -60,6 +70,69 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _loadingTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _handleOAuthCallback() async {
+    if (!kIsWeb) return;
+
+    // URL fragment에서 토큰 추출
+    final token = web_auth.extractTokenFromUrl();
+    if (token != null) {
+      await AuthService.setToken(token);
+      await AuthService.linkDevice();
+      await _checkAuthState();
+      _loadSessions();
+      if (mounted) showSuccessSnackBar(context, '로그인되었습니다!');
+      return;
+    }
+
+    // 에러 확인
+    final error = web_auth.extractAuthErrorFromUrl();
+    if (error != null && mounted) {
+      showErrorSnackBar(context, '로그인에 실패했습니다. 다시 시도해주세요.');
+    }
+  }
+
+  Future<void> _checkAuthState() async {
+    final loggedIn = await AuthService.isLoggedIn();
+    if (loggedIn) {
+      final user = await AuthService.getUser();
+      if (mounted) {
+        setState(() {
+          _isLoggedIn = user != null;
+          _user = user;
+        });
+      }
+    } else {
+      if (mounted) {
+        setState(() {
+          _isLoggedIn = false;
+          _user = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _handleLogin() async {
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+    );
+    // 로그인 화면에서 돌아온 후 상태 확인
+    if (result == true || result == null) {
+      await _checkAuthState();
+      _loadSessions();
+    }
+  }
+
+  Future<void> _handleLogout() async {
+    await AuthService.logout();
+    setState(() {
+      _isLoggedIn = false;
+      _user = null;
+    });
+    _loadSessions();
+    if (mounted) showSuccessSnackBar(context, '로그아웃되었습니다.');
   }
 
   void _startLoadingAnimation() {
@@ -275,28 +348,37 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 다크모드 토글
-            Align(
-              alignment: Alignment.centerRight,
-              child: ValueListenableBuilder<ThemeMode>(
-                valueListenable: themeNotifier,
-                builder: (context, mode, _) {
-                  final isDark = mode == ThemeMode.dark;
-                  return IconButton(
-                    onPressed: () {
-                      themeNotifier.value =
-                          isDark ? ThemeMode.light : ThemeMode.dark;
-                    },
-                    icon: Icon(
-                      isDark
-                          ? Icons.light_mode_rounded
-                          : Icons.dark_mode_rounded,
-                      color: cs.onSurfaceVariant,
-                    ),
-                    tooltip: isDark ? '라이트 모드' : '다크 모드',
-                  );
-                },
-              ),
+            // 상단 바: 다크모드 토글 + 로그인/프로필
+            Row(
+              children: [
+                const Spacer(),
+                // 다크모드 토글
+                ValueListenableBuilder<ThemeMode>(
+                  valueListenable: themeNotifier,
+                  builder: (context, mode, _) {
+                    final isDark = mode == ThemeMode.dark;
+                    return IconButton(
+                      onPressed: () {
+                        themeNotifier.value =
+                            isDark ? ThemeMode.light : ThemeMode.dark;
+                      },
+                      icon: Icon(
+                        isDark
+                            ? Icons.light_mode_rounded
+                            : Icons.dark_mode_rounded,
+                        color: cs.onSurfaceVariant,
+                      ),
+                      tooltip: isDark ? '라이트 모드' : '다크 모드',
+                    );
+                  },
+                ),
+                const SizedBox(width: 4),
+                // 로그인 버튼 또는 프로필
+                if (_isLoggedIn && _user != null)
+                  _buildProfileChip(cs)
+                else
+                  _buildLoginButton(cs),
+              ],
             ),
 
             // 로고 + 타이틀
@@ -732,6 +814,79 @@ class _HomeScreenState extends State<HomeScreen> {
       default:
         return type;
     }
+  }
+
+  Widget _buildLoginButton(ColorScheme cs) {
+    return TextButton(
+      onPressed: _handleLogin,
+      style: TextButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      ),
+      child: Text(
+        '로그인',
+        style: TextStyle(
+          color: cs.primary,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProfileChip(ColorScheme cs) {
+    final nickname = _user?['nickname'] ?? '';
+    final profileImage = _user?['profile_image'] ?? '';
+
+    return InkWell(
+      onTap: () {
+        showModalBottomSheet(
+          context: context,
+          builder: (context) => SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 8),
+                ListTile(
+                  leading: CircleAvatar(
+                    backgroundImage: profileImage.isNotEmpty
+                        ? NetworkImage(profileImage)
+                        : null,
+                    child: profileImage.isEmpty
+                        ? const Icon(Icons.person_rounded)
+                        : null,
+                  ),
+                  title: Text(nickname.isNotEmpty ? nickname : '사용자'),
+                  subtitle: const Text('카카오 계정'),
+                ),
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.logout_rounded),
+                  title: const Text('로그아웃'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _handleLogout();
+                  },
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        );
+      },
+      borderRadius: BorderRadius.circular(20),
+      child: Padding(
+        padding: const EdgeInsets.all(4),
+        child: CircleAvatar(
+          radius: 16,
+          backgroundImage: profileImage.isNotEmpty
+              ? NetworkImage(profileImage)
+              : null,
+          backgroundColor: cs.primaryContainer,
+          child: profileImage.isEmpty
+              ? Icon(Icons.person_rounded, size: 18, color: cs.primary)
+              : null,
+        ),
+      ),
+    );
   }
 
   Widget _buildTemplateOption(

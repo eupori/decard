@@ -3,11 +3,11 @@ import io
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from .auth import get_device_id
+from .auth import get_device_id, get_owner_filter, get_owner_id
 from .config import settings
 from .database import get_db
 from .models import (
@@ -28,6 +28,7 @@ router = APIRouter(prefix="/api/v1")
 
 @router.post("/generate")
 async def generate(
+    request: Request,
     file: UploadFile = File(...),
     template_type: str = Form("definition"),
     db: Session = Depends(get_db),
@@ -54,11 +55,13 @@ async def generate(
         raise HTTPException(400, f"페이지 수가 {settings.MAX_PAGES}페이지를 초과합니다.")
 
     # 세션 생성
+    owner = get_owner_id(request)
     session = SessionModel(
         filename=file.filename or "unknown.pdf",
         page_count=len(pages),
         template_type=template_type,
         device_id=device_id,
+        user_id=owner["user_id"],
         status="processing",
     )
     db.add(session)
@@ -89,11 +92,11 @@ async def generate(
 # ──────────────────────────────────────
 
 @router.get("/sessions")
-def list_sessions(db: Session = Depends(get_db), device_id: str = Depends(get_device_id)):
+def list_sessions(request: Request, db: Session = Depends(get_db)):
+    owner_filter = get_owner_filter(request)
+    query = db.query(SessionModel).filter(SessionModel.status == "completed")
     sessions = (
-        db.query(SessionModel)
-        .filter(SessionModel.status == "completed")
-        .filter(SessionModel.device_id == device_id)
+        owner_filter(query)
         .order_by(SessionModel.created_at.desc())
         .limit(50)
         .all()
@@ -116,8 +119,9 @@ def list_sessions(db: Session = Depends(get_db), device_id: str = Depends(get_de
 # ──────────────────────────────────────
 
 @router.delete("/sessions/{session_id}")
-def delete_session(session_id: str, db: Session = Depends(get_db), device_id: str = Depends(get_device_id)):
-    session = db.query(SessionModel).filter(SessionModel.id == session_id).filter(SessionModel.device_id == device_id).first()
+def delete_session(session_id: str, request: Request, db: Session = Depends(get_db)):
+    owner_filter = get_owner_filter(request)
+    session = owner_filter(db.query(SessionModel).filter(SessionModel.id == session_id)).first()
     if not session:
         raise HTTPException(404, "세션을 찾을 수 없습니다.")
     db.delete(session)
@@ -130,8 +134,9 @@ def delete_session(session_id: str, db: Session = Depends(get_db), device_id: st
 # ──────────────────────────────────────
 
 @router.get("/sessions/{session_id}")
-def get_session(session_id: str, db: Session = Depends(get_db), device_id: str = Depends(get_device_id)):
-    session = db.query(SessionModel).filter(SessionModel.id == session_id).filter(SessionModel.device_id == device_id).first()
+def get_session(session_id: str, request: Request, db: Session = Depends(get_db)):
+    owner_filter = get_owner_filter(request)
+    session = owner_filter(db.query(SessionModel).filter(SessionModel.id == session_id)).first()
     if not session:
         raise HTTPException(404, "세션을 찾을 수 없습니다.")
     return _build_session_response(session)
@@ -239,8 +244,9 @@ async def grade_card(
 # ──────────────────────────────────────
 
 @router.get("/sessions/{session_id}/download")
-def download_csv(session_id: str, db: Session = Depends(get_db), device_id: str = Depends(get_device_id)):
-    session = db.query(SessionModel).filter(SessionModel.id == session_id).filter(SessionModel.device_id == device_id).first()
+def download_csv(session_id: str, request: Request, db: Session = Depends(get_db)):
+    owner_filter = get_owner_filter(request)
+    session = owner_filter(db.query(SessionModel).filter(SessionModel.id == session_id)).first()
     if not session:
         raise HTTPException(404, "세션을 찾을 수 없습니다.")
 

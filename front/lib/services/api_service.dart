@@ -6,14 +6,21 @@ import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
 import '../models/session_model.dart';
 import '../models/card_model.dart';
+import 'auth_service.dart';
 import 'device_service.dart';
 
 class ApiService {
   static Future<Map<String, String>> _headers() async {
+    final headers = <String, String>{};
+    // JWT Bearer 우선
+    final token = await AuthService.getToken();
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+    // device_id는 항상 포함 (폴백 + link-device 용)
     final deviceId = await DeviceService.getDeviceId();
-    return {
-      'X-Device-ID': deviceId,
-    };
+    headers['X-Device-ID'] = deviceId;
+    return headers;
   }
 
   /// PDF 업로드 + 카드 생성 (경로 기반 — 모바일/데스크톱)

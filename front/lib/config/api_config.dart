@@ -14,4 +14,9 @@ class ApiConfig {
       '$baseUrl$apiPrefix/sessions/$id/download';
   static String get sessionsUrl => '$baseUrl$apiPrefix/sessions';
   static String gradeUrl(String id) => '$baseUrl$apiPrefix/cards/$id/grade';
+
+  // Auth
+  static String get kakaoLoginUrl => '$baseUrl$apiPrefix/auth/kakao/login';
+  static String get authMeUrl => '$baseUrl$apiPrefix/auth/me';
+  static String get linkDeviceUrl => '$baseUrl$apiPrefix/auth/link-device';
 }
