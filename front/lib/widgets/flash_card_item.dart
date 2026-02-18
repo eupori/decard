@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../config/theme.dart';
 import '../models/card_model.dart';
+import '../utils/cloze_text.dart';
 
 class FlashCardItem extends StatefulWidget {
   final CardModel card;
@@ -181,13 +182,21 @@ class _FlashCardItemState extends State<FlashCardItem> {
             const SizedBox(height: 12),
 
             // 카드 텍스트
-            Text(
-              _showBack ? card.back : card.front,
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    height: 1.6,
-                    fontWeight: _showBack ? FontWeight.normal : FontWeight.w500,
+            _showBack
+                ? Text(
+                    card.back,
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          height: 1.6,
+                          fontWeight: FontWeight.normal,
+                        ),
+                  )
+                : ClozeText(
+                    text: card.front,
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          height: 1.6,
+                          fontWeight: FontWeight.w500,
+                        ),
                   ),
-            ),
           ],
         ),
       ),

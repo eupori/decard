@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import '../config/theme.dart';
 import '../models/card_model.dart';
+import '../utils/cloze_text.dart';
 
 class StudyScreen extends StatefulWidget {
   final List<CardModel> cards;
@@ -221,8 +222,8 @@ class _StudyScreenState extends State<StudyScreen> {
                                               ?.copyWith(height: 1.6),
                                           textAlign: TextAlign.center,
                                         )
-                                      : Text(
-                                          card.front,
+                                      : ClozeText(
+                                          text: card.front,
                                           key: const ValueKey('front'),
                                           style: Theme.of(context)
                                               .textTheme
