@@ -874,16 +874,28 @@ class _HomeScreenState extends State<HomeScreen> {
       },
       borderRadius: BorderRadius.circular(20),
       child: Padding(
-        padding: const EdgeInsets.all(4),
-        child: CircleAvatar(
-          radius: 16,
-          backgroundImage: profileImage.isNotEmpty
-              ? NetworkImage(profileImage)
-              : null,
-          backgroundColor: cs.primaryContainer,
-          child: profileImage.isEmpty
-              ? Icon(Icons.person_rounded, size: 18, color: cs.primary)
-              : null,
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(
+              radius: 16,
+              backgroundImage: profileImage.isNotEmpty
+                  ? NetworkImage(profileImage)
+                  : null,
+              backgroundColor: cs.primaryContainer,
+              child: profileImage.isEmpty
+                  ? Icon(Icons.person_rounded, size: 18, color: cs.primary)
+                  : null,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              nickname.isNotEmpty ? nickname : '사용자',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+          ],
         ),
       ),
     );
