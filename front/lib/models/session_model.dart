@@ -29,6 +29,8 @@ class SessionModel {
   final int pageCount;
   final String templateType;
   final String status;
+  final String? folderId;
+  final String? displayName;
   final String createdAt;
   final List<CardModel> cards;
   final SessionStats stats;
@@ -39,6 +41,8 @@ class SessionModel {
     required this.pageCount,
     required this.templateType,
     required this.status,
+    this.folderId,
+    this.displayName,
     required this.createdAt,
     required this.cards,
     required this.stats,
@@ -51,6 +55,8 @@ class SessionModel {
       pageCount: json['page_count'] as int? ?? 0,
       templateType: json['template_type'] as String? ?? 'definition',
       status: json['status'] as String,
+      folderId: json['folder_id'] as String?,
+      displayName: json['display_name'] as String?,
       createdAt: json['created_at'] as String,
       cards: (json['cards'] as List<dynamic>)
           .map((c) => CardModel.fromJson(c as Map<String, dynamic>))

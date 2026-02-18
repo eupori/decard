@@ -348,14 +348,36 @@ class _FlashCardItemState extends State<FlashCardItem> {
 
           const Spacer(),
 
-          // 삭제 or 되돌리기
+          // 상태별 액션
           if (card.isRejected)
             TextButton.icon(
               onPressed: widget.onRestore,
               icon: const Icon(Icons.undo_rounded, size: 18),
               label: const Text('되돌리기'),
             )
-          else ...[
+          else if (card.isAccepted) ...[
+            // 되돌리기
+            TextButton.icon(
+              onPressed: widget.onRestore,
+              icon: const Icon(Icons.undo_rounded, size: 18),
+              label: const Text('되돌리기'),
+            ),
+            const SizedBox(width: 4),
+            // 채택됨 표시
+            Flexible(
+              child: FilledButton.icon(
+                onPressed: null,
+                icon: const Icon(Icons.check_circle_rounded, size: 18),
+                label: const Text('채택됨'),
+                style: FilledButton.styleFrom(
+                  minimumSize: Size.zero,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  backgroundColor: AppTheme.acceptedColor,
+                ),
+              ),
+            ),
+          ] else ...[
             // 삭제
             IconButton(
               onPressed: widget.onReject,
@@ -368,20 +390,13 @@ class _FlashCardItemState extends State<FlashCardItem> {
             // 채택
             Flexible(
               child: FilledButton.icon(
-                onPressed: card.isAccepted ? null : widget.onAccept,
-                icon: Icon(
-                  card.isAccepted
-                      ? Icons.check_circle_rounded
-                      : Icons.check_rounded,
-                  size: 18,
-                ),
-                label: Text(card.isAccepted ? '채택됨' : '채택'),
+                onPressed: widget.onAccept,
+                icon: const Icon(Icons.check_rounded, size: 18),
+                label: const Text('채택'),
                 style: FilledButton.styleFrom(
                   minimumSize: Size.zero,
                   padding:
                       const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  backgroundColor:
-                      card.isAccepted ? AppTheme.acceptedColor : null,
                 ),
               ),
             ),

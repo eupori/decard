@@ -6,7 +6,7 @@
 핵심: PDF 업로드 → AI 카드 생성(근거+페이지) → 검수(채택/삭제/수정) → 학습(플래시카드)
 
 **타겟:** 대학생, 고등학생, 자격증 준비생
-**현재 상태:** Phase 2 (콘시어지 테스트 준비) — 카카오 로그인 완료, 프로덕션 배포됨
+**현재 상태:** Phase 3 (보관함 완료) — 보관함 + UX 개선, 프로덕션 배포 대기
 
 **프로덕션 URL:**
 - 웹: https://decard.eupori.dev
@@ -85,14 +85,19 @@ decard/
 │       │   └── theme.dart         # Material 3 테마 (민트 팔레트)
 │       ├── models/
 │       │   ├── card_model.dart    # 카드 데이터 모델
+│       │   ├── folder_model.dart  # 폴더(과목) 데이터 모델
 │       │   └── session_model.dart # 세션 데이터 모델
 │       ├── services/
 │       │   ├── api_service.dart   # HTTP 클라이언트 (JWT Bearer + device_id)
 │       │   ├── auth_service.dart  # JWT 토큰 저장, 유저 캐싱, 로그인/로그아웃
-│       │   └── device_service.dart # 디바이스 ID 관리
+│       │   ├── device_service.dart # 디바이스 ID 관리
+│       │   └── library_prefs.dart # 보관함 자동저장 설정 (SharedPreferences)
 │       ├── screens/
+│       │   ├── main_screen.dart   # 메인 (바텀 네비게이션: 홈/보관함)
 │       │   ├── home_screen.dart   # 홈 (업로드, 템플릿, 기록, 로그인 상태)
 │       │   ├── login_screen.dart  # 로그인 (카카오/Google/Apple/이메일)
+│       │   ├── library_screen.dart # 보관함 (폴더 그리드)
+│       │   ├── folder_detail_screen.dart # 폴더 상세 (세션 목록)
 │       │   ├── review_screen.dart # 리뷰 (채택/삭제/수정)
 │       │   └── study_screen.dart  # 학습 (플래시카드)
 │       ├── utils/
@@ -100,7 +105,8 @@ decard/
 │       │   ├── web_auth_stub.dart # 비웹 스텁
 │       │   └── snackbar_helper.dart
 │       └── widgets/
-│           └── flash_card_item.dart  # 카드 위젯
+│           ├── flash_card_item.dart      # 카드 위젯
+│           └── save_to_library_dialog.dart # 보관함 저장 모달
 ├── deploy/
 │   └── deploy.sh             # VPS 배포 스크립트
 ├── docker-compose.yml        # 백엔드 Docker 설정
@@ -123,6 +129,13 @@ decard/
 | POST | `/api/v1/sessions/{id}/accept-all` | 전체 채택 |
 | GET | `/api/v1/sessions/{id}/download` | CSV 다운로드 (Anki 호환) |
 | POST | `/api/v1/cards/{id}/grade` | AI 채점 |
+| GET | `/api/v1/folders` | 폴더(과목) 목록 |
+| POST | `/api/v1/folders` | 폴더 생성 |
+| PATCH | `/api/v1/folders/{id}` | 폴더 수정 (이름/색상) |
+| DELETE | `/api/v1/folders/{id}` | 폴더 삭제 (세션 보존) |
+| GET | `/api/v1/folders/{id}/sessions` | 폴더 내 세션 목록 |
+| POST | `/api/v1/sessions/{id}/save-to-library` | 보관함 저장 |
+| DELETE | `/api/v1/sessions/{id}/remove-from-library` | 보관함 제거 |
 | GET | `/api/v1/auth/kakao/login` | 카카오 로그인 리다이렉트 |
 | GET | `/api/v1/auth/kakao/callback` | 카카오 OAuth 콜백 → JWT 발급 |
 | GET | `/api/v1/auth/me` | 현재 유저 정보 |
@@ -183,9 +196,18 @@ PDF 업로드 → pdfplumber 텍스트 추출 (페이지별)
 ### 테마 시스템
 
 - `themeNotifier` (ValueNotifier<ThemeMode>) — 글로벌 다크/라이트 토글
+- SharedPreferences `theme_mode` 키로 설정 캐싱 (앱 재시작 시 복원)
 - 팔레트: 민트 `#C2E7DA`, 블루 `#6290C3`, 남색 `#1A1B41`
 - 라이트: 민트 틴트 배경 `#E8F0EC` (순백 X, 눈 피로 감소)
 - 다크: `#121212` 배경, navy 계열 서피스
+
+### 네비게이션 구조
+
+- `MainScreen` — BottomNavigationBar 2탭 (홈/보관함) + IndexedStack
+- `hideBottomNav` (ValueNotifier<bool>) — 카드 생성 로딩 시 바텀바 숨김
+- `mainTabIndex` (ValueNotifier<int>) — push된 화면에서 탭 전환용
+- `buildAppBottomNav()` — ReviewScreen, FolderDetailScreen 등에서 공유 바텀바
+- 보관함 탭은 로그인 유저만 접근 가능 (비로그인 시 로그인 유도 화면)
 
 ### 웹/모바일 분기
 
@@ -240,7 +262,7 @@ static const String baseUrl = String.fromEnvironment(
 3. **HTTP 헤더 한국어**: `Content-Disposition`에 한국어 파일명 → `latin-1` 에러. `filename*=UTF-8''` (RFC 5987) 사용
 4. **Android cleartext**: release APK에서 HTTP 접근 시 `AndroidManifest.xml`에 `usesCleartextTraffic="true"` 필수
 5. **Flutter 웹 핫리로드**: `flutter run -d chrome`이 죽으면 포트 점유 남음. `lsof -ti :8080 | xargs kill -9` 후 재시작
-6. **세션 ID 형식**: `ses_{uuid.hex[:10]}`, 카드 ID: `card_{uuid.hex[:8]}`, 유저 ID: `usr_{uuid.hex[:10]}`
+6. **ID 형식**: 세션 `ses_{uuid.hex[:10]}`, 카드 `card_{uuid.hex[:8]}`, 유저 `usr_{uuid.hex[:10]}`, 폴더 `fld_{uuid.hex[:10]}`
 7. **PDF**: 텍스트 PDF만 지원 (스캔/OCR은 후순위). 크기 10MB, 100페이지 제한
 8. **`.env`와 `decard.db`**: 절대 커밋 금지
 9. **카카오 Redirect URI**: 카카오 콘솔 > 앱 > 플랫폼 키 > REST API 키 클릭 > 카카오 로그인 리다이렉트 URI에서 설정
@@ -272,24 +294,34 @@ static const String baseUrl = String.fromEnvironment(
 - 디바이스 세션 마이그레이션 (로그인 시 자동)
 - 프로덕션 배포 완료
 
-### Phase 2.5: 백그라운드 카드 생성 (현재)
+### Phase 2.5: 백그라운드 카드 생성
 - POST /generate 즉시 반환 (status=processing) + asyncio 백그라운드 생성
 - 포그라운드/백그라운드 선택 UX (업로드 → 선택지 → 대기 or 홈 복귀)
 - 포그라운드 대기: 원형 프로그레스(%) + 예상 시간 + 감성 문구 로테이션 → 완료 시 ReviewScreen 자동 이동
 - 백그라운드 대기: 홈에서 10초 폴링 + 완료 시 스낵바 알림
 - 세션 목록에 processing/failed 상태 UI (스피너/에러 아이콘)
 - UTC 시간 버그 수정 (isoformat + "Z" 접미사)
-- 프로덕션 배포 완료
+
+### Phase 3: 보관함 + UX 개선 (현재)
+- **보관함 기능**: 폴더(과목)별 세션 관리 — CRUD + 6색 프리셋
+- **바텀 네비게이션**: 홈/보관함 2탭 (IndexedStack 상태 유지)
+- **보관함 저장 모달**: ChoiceChip 폴더 선택 + 새 과목 생성 + 자동 저장 옵션
+- **자동 저장**: SharedPreferences 기반, 카드 생성 완료 시 마지막 폴더에 자동 저장
+- **카드 검수 개선**: 전체 채택 + 전체 해제 + 카드별 되돌리기
+- **이전 기록 5개 제한**: 홈 화면 세션 목록 최대 5개
+- **보관함 로그인 전용**: 비로그인 유저는 보관함 탭에서 로그인 유도
+- **테마 캐싱**: 다크/라이트 설정 SharedPreferences 저장·복원
+- **이용 가이드**: 좌상단 ? 버튼 → 6단계 가이드 바텀시트
 
 ---
 
-## 다음 작업 후보 (Phase 3~)
+## 다음 작업 후보 (Phase 4~)
 
 | 우선순위 | 작업 | 설명 |
 |----------|------|------|
-| 1 | 보관함 | 세션/카드 보관 및 관리 기능 |
+| 1 | 프로덕션 배포 | Phase 3 변경사항 프로덕션 반영 |
 | 2 | 콘시어지 테스트 배포 | 테스터에게 링크 공유 + 피드백 폼 |
-| 3 | APK 업데이트 | 로그인 반영된 Android APK 빌드 |
+| 3 | APK 업데이트 | 보관함 반영된 Android APK 빌드 |
 | 4 | Google Play Store 등록 | 앱 이름, 설명, 스크린샷 |
 | 5 | SRS 반복학습 | 간격 반복 알고리즘 (SM-2 등) |
 | 6 | 이메일 회원가입 | 카카오 없는 유저 대응 |

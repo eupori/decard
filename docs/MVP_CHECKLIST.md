@@ -54,7 +54,7 @@
 - [x] "카드 만들기" 버튼 → 로딩 → 결과 페이지 이동
 - [x] 로딩 상태 (스피너 + "약 15~30초 소요" 안내)
 - [x] 다크/라이트 모드 토글 (우상단)
-- [x] 이전 기록 목록 (최근 10개, 삭제 가능)
+- [x] 이전 기록 목록 (최근 5개, 삭제 가능)
 
 ### 리뷰 화면 (`review_screen.dart`)
 - [x] 카드 리스트 뷰 (앞면/뒷면/근거 표시)
@@ -157,6 +157,36 @@
 ### 버그 수정
 - [x] UTC 시간 버그 수정 (isoformat + "Z")
 - [x] 카드 JSON 파싱 실패 디버그 로깅 추가
+
+---
+
+## Phase 3: 보관함 + UX 개선 ✅ 완료
+
+### 백엔드 — 보관함 API
+- [x] FolderModel 추가 (id, name, user_id, device_id, color, timestamps)
+- [x] SessionModel에 folder_id, display_name 컬럼 추가
+- [x] 폴더 CRUD API (GET/POST/PATCH/DELETE /folders)
+- [x] 폴더 내 세션 목록 (GET /folders/{id}/sessions)
+- [x] 보관함 저장/제거 (POST/DELETE /sessions/{id}/save-to-library)
+- [x] 폴더 듀얼 인증 (user_id + device_id) + 로그인 시 마이그레이션
+- [x] DB 마이그레이션 (ALTER TABLE sessions + folders 테이블)
+
+### 프론트엔드 — 보관함 화면
+- [x] MainScreen + BottomNavigationBar 2탭 (홈/보관함)
+- [x] LibraryScreen — 폴더 그리드 (2열, 6색 프리셋)
+- [x] FolderDetailScreen — 폴더 내 세션 목록
+- [x] SaveToLibraryDialog — ChoiceChip 폴더 선택 + 새 과목 생성
+- [x] 자동 저장 (SharedPreferences, 카드 생성 완료 시)
+- [x] 보관함 로그인 전용 (비로그인 시 로그인 유도)
+
+### 프론트엔드 — UX 개선
+- [x] 카드 생성 로딩 시 바텀 네비게이션 숨김
+- [x] ReviewScreen/FolderDetailScreen에 바텀 네비게이션 표시
+- [x] 전체 채택 + 전체 해제 기능
+- [x] 채택된 카드 되돌리기 기능
+- [x] 이전 기록 5개 제한
+- [x] 다크/라이트 테마 설정 캐싱 (SharedPreferences)
+- [x] 좌상단 ? 이용 가이드 버튼
 
 ---
 

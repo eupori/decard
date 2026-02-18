@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
 import '../models/session_model.dart';
 import '../models/card_model.dart';
+import '../models/folder_model.dart';
 import 'auth_service.dart';
 import 'device_service.dart';
 
@@ -156,6 +157,124 @@ class ApiService {
 
     if (response.statusCode != 200) {
       throw ApiException('삭제에 실패했습니다.', response.statusCode);
+    }
+  }
+
+  // ── Folder API ──
+
+  static Future<List<FolderModel>> listFolders() async {
+    final response = await http.get(
+      Uri.parse(ApiConfig.foldersUrl),
+      headers: await _headers(),
+    );
+    if (response.statusCode != 200) {
+      throw ApiException('폴더 목록을 불러올 수 없습니다.', response.statusCode);
+    }
+    final list = jsonDecode(response.body) as List;
+    return list.map((e) => FolderModel.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  static Future<FolderModel> createFolder({
+    required String name,
+    String? color,
+  }) async {
+    final hdrs = await _headers();
+    hdrs['Content-Type'] = 'application/json';
+    final body = <String, dynamic>{'name': name};
+    if (color != null) body['color'] = color;
+
+    final response = await http.post(
+      Uri.parse(ApiConfig.foldersUrl),
+      headers: hdrs,
+      body: jsonEncode(body),
+    );
+    if (response.statusCode != 200) {
+      throw ApiException('폴더 생성에 실패했습니다.', response.statusCode);
+    }
+    return FolderModel.fromJson(jsonDecode(response.body));
+  }
+
+  static Future<FolderModel> updateFolder(
+    String folderId, {
+    String? name,
+    String? color,
+  }) async {
+    final hdrs = await _headers();
+    hdrs['Content-Type'] = 'application/json';
+    final body = <String, dynamic>{};
+    if (name != null) body['name'] = name;
+    if (color != null) body['color'] = color;
+
+    final response = await http.patch(
+      Uri.parse(ApiConfig.folderUrl(folderId)),
+      headers: hdrs,
+      body: jsonEncode(body),
+    );
+    if (response.statusCode != 200) {
+      throw ApiException('폴더 수정에 실패했습니다.', response.statusCode);
+    }
+    return FolderModel.fromJson(jsonDecode(response.body));
+  }
+
+  static Future<void> deleteFolder(String folderId) async {
+    final response = await http.delete(
+      Uri.parse(ApiConfig.folderUrl(folderId)),
+      headers: await _headers(),
+    );
+    if (response.statusCode != 200) {
+      throw ApiException('폴더 삭제에 실패했습니다.', response.statusCode);
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> listFolderSessions(
+      String folderId) async {
+    final response = await http.get(
+      Uri.parse(ApiConfig.folderSessionsUrl(folderId)),
+      headers: await _headers(),
+    );
+    if (response.statusCode != 200) {
+      throw ApiException('세션 목록을 불러올 수 없습니다.', response.statusCode);
+    }
+    final list = jsonDecode(response.body) as List;
+    return list.cast<Map<String, dynamic>>();
+  }
+
+  static Future<Map<String, dynamic>> saveToLibrary({
+    required String sessionId,
+    String? folderId,
+    String? newFolderName,
+    String? newFolderColor,
+    String? displayName,
+  }) async {
+    final hdrs = await _headers();
+    hdrs['Content-Type'] = 'application/json';
+    final body = <String, dynamic>{};
+    if (folderId != null) body['folder_id'] = folderId;
+    if (newFolderName != null) body['new_folder_name'] = newFolderName;
+    if (newFolderColor != null) body['new_folder_color'] = newFolderColor;
+    if (displayName != null) body['display_name'] = displayName;
+
+    final response = await http.post(
+      Uri.parse(ApiConfig.saveToLibraryUrl(sessionId)),
+      headers: hdrs,
+      body: jsonEncode(body),
+    );
+    if (response.statusCode != 200) {
+      throw ApiException(
+        _extractDetail(response.body) ?? '보관함 저장에 실패했습니다.',
+        response.statusCode,
+      );
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  static Future<void> removeFromLibrary(String sessionId) async {
+    final response = await http.delete(
+      Uri.parse(ApiConfig.removeFromLibraryUrl(sessionId)),
+      headers: await _headers(),
+    );
+    if (response.statusCode != 200) {
+      throw ApiException('보관함에서 제거 실패', response.statusCode);
     }
   }
 

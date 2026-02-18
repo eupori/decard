@@ -1,10 +1,25 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'config/theme.dart';
-import 'screens/home_screen.dart';
+import 'screens/main_screen.dart';
 
 final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.dark);
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final prefs = await SharedPreferences.getInstance();
+  final savedTheme = prefs.getString('theme_mode');
+  if (savedTheme == 'light') {
+    themeNotifier.value = ThemeMode.light;
+  } else {
+    themeNotifier.value = ThemeMode.dark;
+  }
+  themeNotifier.addListener(() {
+    prefs.setString(
+      'theme_mode',
+      themeNotifier.value == ThemeMode.dark ? 'dark' : 'light',
+    );
+  });
   runApp(const DecardApp());
 }
 
@@ -22,7 +37,7 @@ class DecardApp extends StatelessWidget {
           theme: AppTheme.light,
           darkTheme: AppTheme.darkTheme,
           themeMode: mode,
-          home: const HomeScreen(),
+          home: const MainScreen(),
         );
       },
     );

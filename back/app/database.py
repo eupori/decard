@@ -35,6 +35,7 @@ def create_tables():
     Base.metadata.create_all(bind=engine)
     _migrate_device_id()
     _migrate_users_table()
+    _migrate_folders()
 
 
 def _migrate_device_id():
@@ -58,3 +59,18 @@ def _migrate_users_table():
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE sessions ADD COLUMN user_id VARCHAR"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_sessions_user_id ON sessions (user_id)"))
+
+
+def _migrate_folders():
+    """Add folder_id, display_name columns to sessions if missing."""
+    insp = inspect(engine)
+
+    # folders 테이블은 create_all에서 이미 생성됨
+    columns = [c["name"] for c in insp.get_columns("sessions")]
+    if "folder_id" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE sessions ADD COLUMN folder_id VARCHAR"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_sessions_folder_id ON sessions (folder_id)"))
+    if "display_name" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE sessions ADD COLUMN display_name VARCHAR"))

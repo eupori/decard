@@ -26,6 +26,20 @@ class UserModel(Base):
     sessions = relationship("SessionModel", back_populates="user")
 
 
+class FolderModel(Base):
+    __tablename__ = "folders"
+
+    id = Column(String, primary_key=True, default=lambda: f"fld_{uuid.uuid4().hex[:10]}")
+    name = Column(String, nullable=False)
+    user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
+    device_id = Column(String, index=True, default="anonymous")
+    color = Column(String, default="#C2E7DA")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    sessions = relationship("SessionModel", back_populates="folder")
+
+
 class SessionModel(Base):
     __tablename__ = "sessions"
 
@@ -35,11 +49,14 @@ class SessionModel(Base):
     template_type = Column(String, default="definition")
     device_id = Column(String, index=True, default="anonymous")
     user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
+    folder_id = Column(String, ForeignKey("folders.id"), nullable=True, index=True)
+    display_name = Column(String, nullable=True)
     status = Column(String, default="processing")  # processing / completed / failed
     created_at = Column(DateTime, default=datetime.utcnow)
 
     cards = relationship("CardModel", back_populates="session", cascade="all, delete-orphan")
     user = relationship("UserModel", back_populates="sessions")
+    folder = relationship("FolderModel", back_populates="sessions")
 
 
 class CardModel(Base):
@@ -121,3 +138,32 @@ class UserResponse(BaseModel):
     kakao_id: str
     nickname: str
     profile_image: str
+
+
+# ── Folder Schemas ──
+
+class FolderCreate(BaseModel):
+    name: str
+    color: Optional[str] = None
+
+
+class FolderUpdate(BaseModel):
+    name: Optional[str] = None
+    color: Optional[str] = None
+
+
+class FolderResponse(BaseModel):
+    id: str
+    name: str
+    color: str
+    session_count: int
+    card_count: int
+    created_at: str
+    updated_at: str
+
+
+class SaveToLibraryRequest(BaseModel):
+    folder_id: Optional[str] = None
+    new_folder_name: Optional[str] = None
+    new_folder_color: Optional[str] = None
+    display_name: Optional[str] = None

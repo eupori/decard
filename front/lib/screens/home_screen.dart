@@ -7,10 +7,12 @@ import 'package:file_picker/file_picker.dart';
 import '../main.dart' show themeNotifier;
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../services/library_prefs.dart';
 import '../utils/snackbar_helper.dart';
 import '../utils/web_auth_stub.dart'
     if (dart.library.html) '../utils/web_auth.dart' as web_auth;
 import 'login_screen.dart';
+import 'main_screen.dart' show hideBottomNav;
 import 'review_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -28,7 +30,12 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _error;
 
   // Generate overlay state
-  bool _showGenerating = false;
+  bool _showGeneratingValue = false;
+  bool get _showGenerating => _showGeneratingValue;
+  set _showGenerating(bool v) {
+    _showGeneratingValue = v;
+    hideBottomNav.value = v;
+  }
   bool _uploadDone = false;
   bool _waitingHere = false;
   String? _generatedSessionId;
@@ -208,6 +215,9 @@ class _HomeScreenState extends State<HomeScreen> {
           _progressTimer?.cancel();
           if (!mounted) return;
 
+          // 자동 저장
+          await _tryAutoSave(_generatedSessionId!);
+
           final session = await ApiService.getSession(_generatedSessionId!);
           if (!mounted) return;
 
@@ -271,6 +281,8 @@ class _HomeScreenState extends State<HomeScreen> {
         );
         if (updated.isNotEmpty && updated['status'] == 'completed') {
           final cardCount = updated['card_count'] as int;
+          // 자동 저장
+          await _tryAutoSave(id);
           if (mounted) {
             showSuccessSnackBar(context, '카드 $cardCount장이 생성되었습니다!');
           }
@@ -280,6 +292,22 @@ class _HomeScreenState extends State<HomeScreen> {
       _startPollingIfNeeded();
     } catch (_) {
       // 폴링 실패는 무시 (다음 주기에 재시도)
+    }
+  }
+
+  Future<void> _tryAutoSave(String sessionId) async {
+    try {
+      final autoSave = await LibraryPrefs.getAutoSave();
+      if (!autoSave) return;
+      final folderId = await LibraryPrefs.getLastFolderId();
+      if (folderId == null) return;
+      await ApiService.saveToLibrary(
+        sessionId: sessionId,
+        folderId: folderId,
+      );
+    } catch (_) {
+      // 자동 저장 실패 시 무시 (폴더 삭제됐을 수 있음)
+      await LibraryPrefs.setLastFolderId(null);
     }
   }
 
@@ -607,9 +635,15 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 상단 바: 다크모드 토글 + 로그인/프로필
+            // 상단 바: 가이드 + 다크모드 토글 + 로그인/프로필
             Row(
               children: [
+                IconButton(
+                  onPressed: () => _showGuide(cs),
+                  icon: Icon(Icons.help_outline_rounded,
+                      color: cs.onSurfaceVariant),
+                  tooltip: '이용 가이드',
+                ),
                 const Spacer(),
                 // 다크모드 토글
                 ValueListenableBuilder<ThemeMode>(
@@ -889,7 +923,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ?.copyWith(fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 12),
-        for (final s in _sessions.take(10)) _buildSessionItem(cs, s),
+        for (final s in _sessions.take(5)) _buildSessionItem(cs, s),
       ],
     );
   }
@@ -951,6 +985,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final status = session['status'] as String? ?? 'completed';
     final createdAt = DateTime.tryParse(session['created_at'] as String);
     final timeAgo = createdAt != null ? _formatTimeAgo(createdAt) : '';
+    final folderId = session['folder_id'] as String?;
     final isProcessing = status == 'processing';
     final isFailed = status == 'failed';
 
@@ -1043,6 +1078,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
               ),
+              // Folder saved indicator
+              if (folderId != null && !isProcessing && !isFailed)
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Icon(Icons.folder_rounded,
+                      size: 16, color: cs.primary.withValues(alpha: 0.6)),
+                ),
               // Card count badge or status indicator
               if (isProcessing)
                 SizedBox(
@@ -1209,6 +1251,94 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showGuide(ColorScheme cs) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: cs.outlineVariant,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text('이용 가이드',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      )),
+              const SizedBox(height: 20),
+              _guideStep(cs, Icons.upload_file_rounded, '1. PDF 업로드',
+                  '시험 범위 강의자료, 교재, 필기노트 등의\nPDF 파일을 업로드하세요.'),
+              _guideStep(cs, Icons.auto_awesome_rounded, '2. 카드 유형 선택',
+                  '정의형, 빈칸형, 비교형 중 원하는\n카드 유형을 선택하세요.'),
+              _guideStep(cs, Icons.style_rounded, '3. AI 카드 생성',
+                  'AI가 PDF를 분석하여 근거 포함\n암기카드를 자동으로 만들어줍니다.'),
+              _guideStep(cs, Icons.checklist_rounded, '4. 카드 검수',
+                  '생성된 카드를 확인하고 채택하거나\n삭제·수정할 수 있습니다.'),
+              _guideStep(cs, Icons.school_rounded, '5. 학습하기',
+                  '플래시카드로 시험 대비 학습을\n시작하세요!'),
+              _guideStep(cs, Icons.folder_rounded, '6. 보관함',
+                  '카드를 과목별로 정리하고 관리할 수\n있습니다. (로그인 필요)'),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _guideStep(
+      ColorScheme cs, IconData icon, String title, String desc) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: cs.primaryContainer,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, size: 18, color: cs.primary),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w600, fontSize: 14)),
+                const SizedBox(height: 2),
+                Text(desc,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: cs.onSurfaceVariant,
+                          height: 1.4,
+                        )),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

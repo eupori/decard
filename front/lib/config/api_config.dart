@@ -19,4 +19,14 @@ class ApiConfig {
   static String get kakaoLoginUrl => '$baseUrl$apiPrefix/auth/kakao/login';
   static String get authMeUrl => '$baseUrl$apiPrefix/auth/me';
   static String get linkDeviceUrl => '$baseUrl$apiPrefix/auth/link-device';
+
+  // Folders
+  static String get foldersUrl => '$baseUrl$apiPrefix/folders';
+  static String folderUrl(String id) => '$baseUrl$apiPrefix/folders/$id';
+  static String folderSessionsUrl(String id) =>
+      '$baseUrl$apiPrefix/folders/$id/sessions';
+  static String saveToLibraryUrl(String sessionId) =>
+      '$baseUrl$apiPrefix/sessions/$sessionId/save-to-library';
+  static String removeFromLibraryUrl(String sessionId) =>
+      '$baseUrl$apiPrefix/sessions/$sessionId/remove-from-library';
 }

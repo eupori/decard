@@ -8,12 +8,13 @@ from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, R
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from .auth import get_device_id, get_owner_filter, get_owner_id
+from .auth import get_device_id, get_owner_filter, get_owner_filter_for_folder, get_owner_id
 from .config import settings
 from .database import get_db, SessionLocal
 from .models import (
-    SessionModel, CardModel, GradeModel,
+    SessionModel, CardModel, GradeModel, FolderModel,
     CardResponse, CardUpdate, SessionResponse, GradeResponse,
+    FolderCreate, FolderUpdate, FolderResponse, SaveToLibraryRequest,
 )
 from .pdf_service import extract_text_from_pdf, validate_pdf
 from .card_service import generate_cards
@@ -101,6 +102,8 @@ def list_sessions(request: Request, db: Session = Depends(get_db)):
             "template_type": s.template_type,
             "status": s.status,
             "card_count": len(s.cards),
+            "folder_id": s.folder_id,
+            "display_name": s.display_name,
             "created_at": s.created_at.isoformat() + "Z",
         }
         for s in sessions
@@ -281,6 +284,220 @@ def download_csv(session_id: str, request: Request, db: Session = Depends(get_db
 
 
 # ──────────────────────────────────────
+# Folder CRUD
+# ──────────────────────────────────────
+
+PRESET_COLORS = {"#C2E7DA", "#6290C3", "#9B72CF", "#F59E0B", "#EF4444", "#94A3B8"}
+
+
+@router.get("/folders")
+def list_folders(request: Request, db: Session = Depends(get_db)):
+    folder_filter = get_owner_filter_for_folder(request)
+    folders = (
+        folder_filter(db.query(FolderModel))
+        .order_by(FolderModel.created_at.desc())
+        .all()
+    )
+    result = []
+    for f in folders:
+        session_count = len(f.sessions)
+        card_count = sum(len(s.cards) for s in f.sessions)
+        result.append({
+            "id": f.id,
+            "name": f.name,
+            "color": f.color,
+            "session_count": session_count,
+            "card_count": card_count,
+            "created_at": f.created_at.isoformat() + "Z",
+            "updated_at": f.updated_at.isoformat() + "Z",
+        })
+    return result
+
+
+@router.post("/folders")
+def create_folder(
+    body: FolderCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    device_id: str = Depends(get_device_id),
+):
+    owner = get_owner_id(request)
+    color = body.color if body.color and body.color in PRESET_COLORS else "#C2E7DA"
+    folder = FolderModel(
+        name=body.name,
+        color=color,
+        user_id=owner["user_id"],
+        device_id=device_id,
+    )
+    db.add(folder)
+    db.commit()
+    db.refresh(folder)
+    return {
+        "id": folder.id,
+        "name": folder.name,
+        "color": folder.color,
+        "session_count": 0,
+        "card_count": 0,
+        "created_at": folder.created_at.isoformat() + "Z",
+        "updated_at": folder.updated_at.isoformat() + "Z",
+    }
+
+
+@router.patch("/folders/{folder_id}")
+def update_folder(
+    folder_id: str,
+    body: FolderUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    folder_filter = get_owner_filter_for_folder(request)
+    folder = folder_filter(db.query(FolderModel).filter(FolderModel.id == folder_id)).first()
+    if not folder:
+        raise HTTPException(404, "폴더를 찾을 수 없습니다.")
+
+    if body.name is not None:
+        folder.name = body.name
+    if body.color is not None and body.color in PRESET_COLORS:
+        folder.color = body.color
+    from datetime import datetime as dt
+    folder.updated_at = dt.utcnow()
+
+    db.commit()
+    db.refresh(folder)
+
+    session_count = len(folder.sessions)
+    card_count = sum(len(s.cards) for s in folder.sessions)
+    return {
+        "id": folder.id,
+        "name": folder.name,
+        "color": folder.color,
+        "session_count": session_count,
+        "card_count": card_count,
+        "created_at": folder.created_at.isoformat() + "Z",
+        "updated_at": folder.updated_at.isoformat() + "Z",
+    }
+
+
+@router.delete("/folders/{folder_id}")
+def delete_folder(
+    folder_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    folder_filter = get_owner_filter_for_folder(request)
+    folder = folder_filter(db.query(FolderModel).filter(FolderModel.id == folder_id)).first()
+    if not folder:
+        raise HTTPException(404, "폴더를 찾을 수 없습니다.")
+
+    # 세션의 folder_id를 null로 (세션 자체는 보존)
+    for s in folder.sessions:
+        s.folder_id = None
+    db.delete(folder)
+    db.commit()
+    return {"deleted": folder_id}
+
+
+@router.get("/folders/{folder_id}/sessions")
+def list_folder_sessions(
+    folder_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    folder_filter = get_owner_filter_for_folder(request)
+    folder = folder_filter(db.query(FolderModel).filter(FolderModel.id == folder_id)).first()
+    if not folder:
+        raise HTTPException(404, "폴더를 찾을 수 없습니다.")
+
+    sessions = (
+        db.query(SessionModel)
+        .filter(SessionModel.folder_id == folder_id)
+        .order_by(SessionModel.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": s.id,
+            "filename": s.filename,
+            "page_count": s.page_count,
+            "template_type": s.template_type,
+            "status": s.status,
+            "card_count": len(s.cards),
+            "folder_id": s.folder_id,
+            "display_name": s.display_name,
+            "created_at": s.created_at.isoformat() + "Z",
+        }
+        for s in sessions
+    ]
+
+
+# ──────────────────────────────────────
+# Save to / Remove from Library
+# ──────────────────────────────────────
+
+@router.post("/sessions/{session_id}/save-to-library")
+def save_to_library(
+    session_id: str,
+    body: SaveToLibraryRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    device_id: str = Depends(get_device_id),
+):
+    owner_filter = get_owner_filter(request)
+    session = owner_filter(db.query(SessionModel).filter(SessionModel.id == session_id)).first()
+    if not session:
+        raise HTTPException(404, "세션을 찾을 수 없습니다.")
+
+    # 폴더 결정: 기존 폴더 or 새 폴더 생성
+    if body.folder_id:
+        folder_filter = get_owner_filter_for_folder(request)
+        folder = folder_filter(db.query(FolderModel).filter(FolderModel.id == body.folder_id)).first()
+        if not folder:
+            raise HTTPException(404, "폴더를 찾을 수 없습니다.")
+    elif body.new_folder_name:
+        owner = get_owner_id(request)
+        color = body.new_folder_color if body.new_folder_color and body.new_folder_color in PRESET_COLORS else "#C2E7DA"
+        folder = FolderModel(
+            name=body.new_folder_name,
+            color=color,
+            user_id=owner["user_id"],
+            device_id=device_id,
+        )
+        db.add(folder)
+        db.flush()
+    else:
+        raise HTTPException(400, "folder_id 또는 new_folder_name을 지정해주세요.")
+
+    session.folder_id = folder.id
+    if body.display_name is not None:
+        session.display_name = body.display_name
+
+    db.commit()
+    return {
+        "session_id": session.id,
+        "folder_id": folder.id,
+        "folder_name": folder.name,
+        "display_name": session.display_name,
+    }
+
+
+@router.delete("/sessions/{session_id}/remove-from-library")
+def remove_from_library(
+    session_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    owner_filter = get_owner_filter(request)
+    session = owner_filter(db.query(SessionModel).filter(SessionModel.id == session_id)).first()
+    if not session:
+        raise HTTPException(404, "세션을 찾을 수 없습니다.")
+
+    session.folder_id = None
+    session.display_name = None
+    db.commit()
+    return {"removed": session_id}
+
+
+# ──────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────
 
@@ -348,6 +565,8 @@ def _build_session_response(session: SessionModel) -> dict:
         "page_count": session.page_count,
         "template_type": session.template_type,
         "status": session.status,
+        "folder_id": session.folder_id,
+        "display_name": session.display_name,
         "created_at": session.created_at.isoformat() + "Z",
         "cards": cards,
         "stats": stats,

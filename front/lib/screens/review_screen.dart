@@ -5,6 +5,8 @@ import '../models/card_model.dart';
 import '../services/api_service.dart';
 import '../utils/snackbar_helper.dart';
 import '../widgets/flash_card_item.dart';
+import '../widgets/save_to_library_dialog.dart';
+import 'main_screen.dart' show buildAppBottomNav;
 import 'study_screen.dart';
 import 'subjective_study_screen.dart';
 
@@ -20,11 +22,13 @@ class ReviewScreen extends StatefulWidget {
 class _ReviewScreenState extends State<ReviewScreen> {
   late List<CardModel> _cards;
   String _filter = 'all'; // all / pending / accepted / rejected
+  late bool _isSaved;
 
   @override
   void initState() {
     super.initState();
     _cards = List.from(widget.session.cards);
+    _isSaved = widget.session.folderId != null;
   }
 
   List<CardModel> get _filteredCards {
@@ -62,6 +66,41 @@ class _ReviewScreenState extends State<ReviewScreen> {
       if (mounted) {
         showErrorSnackBar(context, '전체 채택 실패: ${friendlyError(e)}');
       }
+    }
+  }
+
+  Future<void> _resetAll() async {
+    try {
+      int count = 0;
+      for (final card in _cards) {
+        if (!card.isPending) {
+          await ApiService.updateCard(card.id, status: 'pending');
+          card.status = 'pending';
+          count++;
+        }
+      }
+      setState(() {});
+      if (mounted) {
+        showSuccessSnackBar(context, '$count장 카드를 되돌렸습니다.');
+      }
+    } catch (e) {
+      if (mounted) {
+        showErrorSnackBar(context, '전체 해제 실패: ${friendlyError(e)}');
+      }
+    }
+  }
+
+  Future<void> _saveToLibrary() async {
+    final defaultName = widget.session.displayName ??
+        widget.session.filename.replaceAll('.pdf', '');
+    final saved = await SaveToLibraryDialog.show(
+      context,
+      sessionId: widget.session.id,
+      defaultName: defaultName,
+    );
+    if (saved == true && mounted) {
+      setState(() => _isSaved = true);
+      showSuccessSnackBar(context, '보관함에 저장되었습니다.');
     }
   }
 
@@ -105,7 +144,8 @@ class _ReviewScreenState extends State<ReviewScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          widget.session.filename.replaceAll('.pdf', ''),
+          widget.session.displayName ??
+              widget.session.filename.replaceAll('.pdf', ''),
           style: const TextStyle(fontSize: 16),
         ),
         actions: [
@@ -116,6 +156,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
           ),
         ],
       ),
+      bottomNavigationBar: buildAppBottomNav(context, selectedIndex: 0),
       body: Column(
         children: [
           // 통계 바
@@ -229,24 +270,58 @@ class _ReviewScreenState extends State<ReviewScreen> {
   Widget _buildActionBar(ColorScheme cs) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: Row(
+      child: Column(
         children: [
-          if (_pendingCount > 0) ...[
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _acceptAll,
-                icon: const Icon(Icons.check_circle_outline, size: 18),
-                label: Text('전체 채택 ($_pendingCount장)'),
+          // 보관함 저장 버튼
+          SizedBox(
+            width: double.infinity,
+            child: _isSaved
+                ? OutlinedButton.icon(
+                    onPressed: _saveToLibrary,
+                    icon: Icon(Icons.folder_rounded,
+                        size: 18, color: cs.primary),
+                    label: Text('보관됨',
+                        style: TextStyle(color: cs.primary)),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: cs.primary),
+                    ),
+                  )
+                : OutlinedButton.icon(
+                    onPressed: _saveToLibrary,
+                    icon: const Icon(Icons.folder_open_outlined, size: 18),
+                    label: const Text('보관함에 저장'),
+                  ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              if (_pendingCount > 0) ...[
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _acceptAll,
+                    icon: const Icon(Icons.check_circle_outline, size: 18),
+                    label: Text('전체 채택 ($_pendingCount장)'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+              ] else if (_acceptedCount > 0 || _rejectedCount > 0) ...[
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _resetAll,
+                    icon: const Icon(Icons.undo_rounded, size: 18),
+                    label: const Text('전체 해제'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+              ],
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _startStudy,
+                  icon: const Icon(Icons.school_rounded, size: 18),
+                  label: const Text('학습하기'),
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
-          ],
-          Expanded(
-            child: FilledButton.icon(
-              onPressed: _startStudy,
-              icon: const Icon(Icons.school_rounded, size: 18),
-              label: const Text('학습하기'),
-            ),
+            ],
           ),
         ],
       ),

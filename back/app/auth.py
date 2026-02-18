@@ -8,7 +8,7 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .models import UserModel, SessionModel
+from .models import UserModel, SessionModel, FolderModel
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,18 @@ def link_device_sessions(db: Session, user: UserModel, device_id: str):
         s.device_id = f"migrated_{user.id}"
     db.commit()
 
-    logger.info("Linked %d sessions from device %s to user %s", len(sessions), device_id, user.id)
+    # 폴더도 마이그레이션
+    folders = db.query(FolderModel).filter(
+        FolderModel.device_id == device_id,
+        FolderModel.user_id.is_(None),
+    ).all()
+    for f in folders:
+        f.user_id = user.id
+        f.device_id = f"migrated_{user.id}"
+    db.commit()
+
+    logger.info("Linked %d sessions, %d folders from device %s to user %s",
+                len(sessions), len(folders), device_id, user.id)
 
 
 # ──────────────────────────────────────
@@ -143,6 +154,17 @@ def get_owner_filter(request: Request):
     else:
         # 비로그인: device_id로만 조회
         return lambda q: q.filter(SessionModel.device_id == device_id)
+
+
+def get_owner_filter_for_folder(request: Request):
+    """Return SQLAlchemy filter for folder ownership (dual auth)."""
+    user_id = _get_user_id_from_token(request)
+    device_id = get_device_id(request)
+
+    if user_id:
+        return lambda q: q.filter(FolderModel.user_id == user_id)
+    else:
+        return lambda q: q.filter(FolderModel.device_id == device_id)
 
 
 def get_owner_id(request: Request) -> dict:
