@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey
+from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from pydantic import BaseModel
 from typing import List, Optional
@@ -20,6 +20,7 @@ class SessionModel(Base):
     filename = Column(String, nullable=False)
     page_count = Column(Integer, default=0)
     template_type = Column(String, default="definition")
+    device_id = Column(String, index=True, default="anonymous")
     status = Column(String, default="processing")  # processing / completed / failed
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -41,6 +42,18 @@ class CardModel(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     session = relationship("SessionModel", back_populates="cards")
+
+
+class GradeModel(Base):
+    __tablename__ = "grades"
+
+    id = Column(String, primary_key=True, default=lambda: f"grade_{uuid.uuid4().hex[:8]}")
+    card_id = Column(String, ForeignKey("cards.id"), nullable=False)
+    user_answer = Column(Text, nullable=False)
+    has_drawing = Column(Boolean, default=False)
+    score = Column(String, nullable=False)  # correct / partial / incorrect
+    feedback = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 # ──────────────────────────────────────
@@ -73,3 +86,16 @@ class SessionResponse(BaseModel):
     created_at: str
     cards: List[CardResponse]
     stats: dict
+
+
+class GradeRequest(BaseModel):
+    user_answer: str
+
+
+class GradeResponse(BaseModel):
+    id: str
+    card_id: str
+    user_answer: str
+    score: str
+    feedback: str
+    model_answer: str

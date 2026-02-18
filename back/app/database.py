@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event, text, inspect
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
 from .config import settings
@@ -8,6 +8,15 @@ engine = create_engine(
     connect_args={"check_same_thread": False} if "sqlite" in settings.DATABASE_URL else {},
 )
 SessionLocal = sessionmaker(bind=engine)
+
+
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragma(dbapi_conn, connection_record):
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.close()
 
 
 class Base(DeclarativeBase):
@@ -24,3 +33,14 @@ def get_db():
 
 def create_tables():
     Base.metadata.create_all(bind=engine)
+    _migrate_device_id()
+
+
+def _migrate_device_id():
+    """Add device_id column to sessions table if missing."""
+    insp = inspect(engine)
+    columns = [c["name"] for c in insp.get_columns("sessions")]
+    if "device_id" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE sessions ADD COLUMN device_id VARCHAR DEFAULT 'anonymous'"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_sessions_device_id ON sessions (device_id)"))

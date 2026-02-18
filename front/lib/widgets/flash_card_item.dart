@@ -390,6 +390,8 @@ class _FlashCardItemState extends State<FlashCardItem> {
         return '빈칸형';
       case 'comparison':
         return '비교형';
+      case 'subjective':
+        return '주관식';
       default:
         return type;
     }

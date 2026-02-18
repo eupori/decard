@@ -3,8 +3,10 @@ import '../config/theme.dart';
 import '../models/session_model.dart';
 import '../models/card_model.dart';
 import '../services/api_service.dart';
+import '../utils/snackbar_helper.dart';
 import '../widgets/flash_card_item.dart';
 import 'study_screen.dart';
+import 'subjective_study_screen.dart';
 
 class ReviewScreen extends StatefulWidget {
   final SessionModel session;
@@ -40,9 +42,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
       setState(() => card.status = status);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('업데이트 실패: $e')),
-        );
+        showErrorSnackBar(context, '업데이트 실패: ${friendlyError(e)}');
       }
     }
   }
@@ -56,15 +56,11 @@ class _ReviewScreenState extends State<ReviewScreen> {
         }
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$count장 카드를 채택했습니다.')),
-        );
+        showSuccessSnackBar(context, '$count장 카드를 채택했습니다.');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('전체 채택 실패: $e')),
-        );
+        showErrorSnackBar(context, '전체 채택 실패: ${friendlyError(e)}');
       }
     }
   }
@@ -72,20 +68,33 @@ class _ReviewScreenState extends State<ReviewScreen> {
   void _startStudy() {
     final studyCards = _cards.where((c) => !c.isRejected).toList();
     if (studyCards.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('학습할 카드가 없습니다.')),
-      );
+      showErrorSnackBar(context, '학습할 카드가 없습니다.');
       return;
     }
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => StudyScreen(
-          cards: studyCards,
-          title: widget.session.filename.replaceAll('.pdf', ''),
+
+    final title = widget.session.filename.replaceAll('.pdf', '');
+
+    if (widget.session.templateType == 'subjective') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => SubjectiveStudyScreen(
+            cards: studyCards,
+            title: title,
+          ),
         ),
-      ),
-    );
+      );
+    } else {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => StudyScreen(
+            cards: studyCards,
+            title: title,
+          ),
+        ),
+      );
+    }
   }
 
   @override
@@ -143,9 +152,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
                             });
                           } catch (e) {
                             if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('수정 실패: $e')),
-                              );
+                              showErrorSnackBar(context, '수정 실패: ${friendlyError(e)}');
                             }
                           }
                         },
@@ -247,15 +254,37 @@ class _ReviewScreenState extends State<ReviewScreen> {
   }
 
   Widget _buildEmpty(ColorScheme cs) {
+    IconData icon;
+    String message;
+
+    switch (_filter) {
+      case 'pending':
+        icon = Icons.check_circle_outline_rounded;
+        message = '모든 카드를 검수했습니다!';
+        break;
+      case 'accepted':
+        icon = Icons.thumb_up_off_alt_rounded;
+        message = '아직 채택된 카드가 없습니다.\n카드를 확인하고 채택해보세요.';
+        break;
+      case 'rejected':
+        icon = Icons.delete_outline_rounded;
+        message = '삭제된 카드가 없습니다.';
+        break;
+      default:
+        icon = Icons.inbox_rounded;
+        message = '카드가 없습니다.';
+    }
+
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.inbox_rounded, size: 48, color: cs.onSurfaceVariant),
+          Icon(icon, size: 48, color: cs.onSurfaceVariant),
           const SizedBox(height: 12),
           Text(
-            '해당 상태의 카드가 없습니다.',
+            message,
             style: TextStyle(color: cs.onSurfaceVariant),
+            textAlign: TextAlign.center,
           ),
         ],
       ),

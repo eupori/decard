@@ -1,6 +1,8 @@
 class ApiConfig {
-  // 개발: localhost, 프로덕션: EC2 URL로 변경
-  static const String baseUrl = 'http://192.168.35.211:8001';
+  static const String baseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'http://192.168.35.211:8001',
+  );
   static const String apiPrefix = '/api/v1';
 
   static String get generateUrl => '$baseUrl$apiPrefix/generate';
@@ -11,4 +13,5 @@ class ApiConfig {
   static String downloadUrl(String id) =>
       '$baseUrl$apiPrefix/sessions/$id/download';
   static String get sessionsUrl => '$baseUrl$apiPrefix/sessions';
+  static String gradeUrl(String id) => '$baseUrl$apiPrefix/cards/$id/grade';
 }

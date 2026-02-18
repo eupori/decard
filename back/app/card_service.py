@@ -2,13 +2,10 @@ import json
 import logging
 from typing import List, Dict
 
-import anthropic
-
 from .config import settings
+from .claude_cli import run_claude
 
 logger = logging.getLogger(__name__)
-
-client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 
 TEMPLATE_INSTRUCTIONS = {
     "definition": """정의형 카드를 만드세요.
@@ -36,6 +33,15 @@ TEMPLATE_INSTRUCTIONS = {
 예시:
 - 앞면: "동화(assimilation) vs 조절(accommodation)의 차이점은?"
 - 뒷면: "동화: 기존 스키마에 새 정보를 맞춤 / 조절: 새 정보에 맞게 스키마를 변경"
+""",
+
+    "subjective": """주관식(서술형) 카드를 만드세요.
+- 앞면: 서술형 개방 질문 ("~를 서술하시오", "~의 과정을 설명하시오", "~의 의의를 논하시오")
+- 뒷면: 모범답안 3~5문장 (핵심 키워드를 반드시 포함 — AI 채점 기준이 됩니다)
+
+예시:
+- 앞면: "피아제의 인지발달 이론에서 동화와 조절의 개념을 설명하고, 두 과정의 관계를 서술하시오."
+- 뒷면: "동화(assimilation)란 새로운 정보를 기존의 인지 구조(스키마)에 맞추어 해석하는 과정이다. 조절(accommodation)은 기존 스키마로 설명할 수 없는 새 정보에 맞게 스키마를 수정하거나 새로 만드는 과정이다. 두 과정은 상호보완적이며, 동화와 조절의 균형을 통해 평형화(equilibration)가 이루어지고, 이것이 인지 발달의 핵심 원동력이 된다."
 """,
 }
 
@@ -112,14 +118,7 @@ async def _generate_chunk(pages: List[Dict], template_type: str) -> List[Dict]:
     system_prompt = _build_system_prompt(template_type)
     user_prompt = _build_user_prompt(pages)
 
-    response = await client.messages.create(
-        model=settings.LLM_MODEL,
-        max_tokens=settings.LLM_MAX_TOKENS,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_prompt}],
-    )
-
-    raw_text = response.content[0].text
+    raw_text = await run_claude(system_prompt, user_prompt, model=settings.LLM_MODEL)
     cards_raw = _parse_cards_json(raw_text)
 
     validated = []

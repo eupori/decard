@@ -1,19 +1,22 @@
 import csv
 import io
 import logging
+from typing import Optional
 
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from .auth import get_device_id
 from .config import settings
 from .database import get_db
 from .models import (
-    SessionModel, CardModel,
-    CardResponse, CardUpdate, SessionResponse,
+    SessionModel, CardModel, GradeModel,
+    CardResponse, CardUpdate, SessionResponse, GradeResponse,
 )
 from .pdf_service import extract_text_from_pdf, validate_pdf
 from .card_service import generate_cards
+from .grade_service import grade_answer
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1")
@@ -28,9 +31,15 @@ async def generate(
     file: UploadFile = File(...),
     template_type: str = Form("definition"),
     db: Session = Depends(get_db),
+    device_id: str = Depends(get_device_id),
 ):
+    # "subjective" — TODO: MVP 이후 추가
     if template_type not in ("definition", "cloze", "comparison"):
         raise HTTPException(400, "지원하지 않는 템플릿입니다. (definition / cloze / comparison)")
+
+    # File size pre-check (Content-Length header)
+    if file.size and file.size > settings.MAX_PDF_SIZE_MB * 1024 * 1024:
+        raise HTTPException(400, f"파일 크기가 {settings.MAX_PDF_SIZE_MB}MB를 초과합니다.")
 
     content = await file.read()
 
@@ -49,6 +58,7 @@ async def generate(
         filename=file.filename or "unknown.pdf",
         page_count=len(pages),
         template_type=template_type,
+        device_id=device_id,
         status="processing",
     )
     db.add(session)
@@ -71,7 +81,7 @@ async def generate(
         logger.exception("카드 생성 실패: session=%s", session.id)
         session.status = "failed"
         db.commit()
-        raise HTTPException(500, f"카드 생성에 실패했습니다: {e}")
+        raise HTTPException(500, _safe_error("카드 생성에 실패했습니다", e))
 
 
 # ──────────────────────────────────────
@@ -79,10 +89,11 @@ async def generate(
 # ──────────────────────────────────────
 
 @router.get("/sessions")
-def list_sessions(db: Session = Depends(get_db)):
+def list_sessions(db: Session = Depends(get_db), device_id: str = Depends(get_device_id)):
     sessions = (
         db.query(SessionModel)
         .filter(SessionModel.status == "completed")
+        .filter(SessionModel.device_id == device_id)
         .order_by(SessionModel.created_at.desc())
         .limit(50)
         .all()
@@ -105,8 +116,8 @@ def list_sessions(db: Session = Depends(get_db)):
 # ──────────────────────────────────────
 
 @router.delete("/sessions/{session_id}")
-def delete_session(session_id: str, db: Session = Depends(get_db)):
-    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+def delete_session(session_id: str, db: Session = Depends(get_db), device_id: str = Depends(get_device_id)):
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).filter(SessionModel.device_id == device_id).first()
     if not session:
         raise HTTPException(404, "세션을 찾을 수 없습니다.")
     db.delete(session)
@@ -119,8 +130,8 @@ def delete_session(session_id: str, db: Session = Depends(get_db)):
 # ──────────────────────────────────────
 
 @router.get("/sessions/{session_id}")
-def get_session(session_id: str, db: Session = Depends(get_db)):
-    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+def get_session(session_id: str, db: Session = Depends(get_db), device_id: str = Depends(get_device_id)):
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).filter(SessionModel.device_id == device_id).first()
     if not session:
         raise HTTPException(404, "세션을 찾을 수 없습니다.")
     return _build_session_response(session)
@@ -166,12 +177,70 @@ def accept_all(session_id: str, db: Session = Depends(get_db)):
 
 
 # ──────────────────────────────────────
+# POST /api/v1/cards/{id}/grade — AI 채점
+# ──────────────────────────────────────
+
+@router.post("/cards/{card_id}/grade")
+async def grade_card(
+    card_id: str,
+    user_answer: str = Form(""),
+    drawing: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
+):
+    card = db.query(CardModel).filter(CardModel.id == card_id).first()
+    if not card:
+        raise HTTPException(404, "카드를 찾을 수 없습니다.")
+
+    # 손글씨 이미지 읽기
+    drawing_image = None
+    has_drawing = False
+    if drawing and drawing.filename:
+        drawing_image = await drawing.read()
+        has_drawing = True
+
+    if not user_answer.strip() and not drawing_image:
+        raise HTTPException(400, "답안을 입력해주세요. (텍스트 또는 손글씨)")
+
+    try:
+        result = await grade_answer(
+            question=card.front,
+            model_answer=card.back,
+            user_answer=user_answer,
+            drawing_image=drawing_image,
+        )
+
+        grade = GradeModel(
+            card_id=card_id,
+            user_answer=user_answer,
+            has_drawing=has_drawing,
+            score=result["score"],
+            feedback=result["feedback"],
+        )
+        db.add(grade)
+        db.commit()
+        db.refresh(grade)
+
+        return GradeResponse(
+            id=grade.id,
+            card_id=card_id,
+            user_answer=user_answer,
+            score=result["score"],
+            feedback=result["feedback"],
+            model_answer=card.back,
+        ).model_dump()
+
+    except Exception as e:
+        logger.exception("채점 실패: card=%s", card_id)
+        raise HTTPException(500, _safe_error("채점에 실패했습니다", e))
+
+
+# ──────────────────────────────────────
 # GET /api/v1/sessions/{id}/download — CSV 다운로드
 # ──────────────────────────────────────
 
 @router.get("/sessions/{session_id}/download")
-def download_csv(session_id: str, db: Session = Depends(get_db)):
-    session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+def download_csv(session_id: str, db: Session = Depends(get_db), device_id: str = Depends(get_device_id)):
+    session = db.query(SessionModel).filter(SessionModel.id == session_id).filter(SessionModel.device_id == device_id).first()
     if not session:
         raise HTTPException(404, "세션을 찾을 수 없습니다.")
 
@@ -215,6 +284,13 @@ def download_csv(session_id: str, db: Session = Depends(get_db)):
 # ──────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────
+
+def _safe_error(detail: str, exc: Exception) -> str:
+    """Hide internal error details in production."""
+    if settings.APP_ENV == "dev":
+        return f"{detail}: {exc}"
+    return detail
+
 
 def _card_to_response(card: CardModel) -> dict:
     return CardResponse(

@@ -4,10 +4,9 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     APP_ENV: str = "dev"
 
-    # Claude API
-    ANTHROPIC_API_KEY: str = ""
+    # Claude CLI
     LLM_MODEL: str = "claude-sonnet-4-5-20250929"
-    LLM_MAX_TOKENS: int = 8000
+    CLAUDE_TIMEOUT_SECONDS: int = 120
 
     # Database
     DATABASE_URL: str = "sqlite:///./decard.db"

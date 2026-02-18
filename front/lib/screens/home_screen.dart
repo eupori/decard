@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -6,6 +7,7 @@ import 'package:file_picker/file_picker.dart';
 import '../main.dart' show themeNotifier;
 import '../models/session_model.dart';
 import '../services/api_service.dart';
+import '../utils/snackbar_helper.dart';
 import 'review_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -25,6 +27,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<Map<String, dynamic>> _sessions = [];
   bool _sessionsLoading = true;
+  bool _sessionsError = false;
+
+  // Loading animation
+  int _loadingMessageIndex = 0;
+  Timer? _loadingTimer;
+  final _loadingMessages = [
+    'PDF 분석 중...',
+    '텍스트 추출 중...',
+    '카드 생성 중...',
+    '근거 매칭 중...',
+    '거의 완료...',
+  ];
 
   final _templateOptions = [
     ('definition', '정의형', 'OO란? 형태의 Q&A', Icons.menu_book_rounded),
@@ -42,12 +56,37 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadSessions();
   }
 
+  @override
+  void dispose() {
+    _loadingTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startLoadingAnimation() {
+    _loadingMessageIndex = 0;
+    _loadingTimer?.cancel();
+    _loadingTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      if (mounted && _isLoading) {
+        setState(() {
+          _loadingMessageIndex =
+              (_loadingMessageIndex + 1) % _loadingMessages.length;
+        });
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
   Future<void> _loadSessions() async {
+    setState(() {
+      _sessionsLoading = true;
+      _sessionsError = false;
+    });
     try {
       final sessions = await ApiService.listSessions();
       if (mounted) setState(() => _sessions = sessions);
     } catch (_) {
-      // 실패해도 무시
+      if (mounted) setState(() => _sessionsError = true);
     } finally {
       if (mounted) setState(() => _sessionsLoading = false);
     }
@@ -62,12 +101,40 @@ class _HomeScreenState extends State<HomeScreen> {
         context,
         MaterialPageRoute(builder: (_) => ReviewScreen(session: session)),
       ).then((_) => _loadSessions());
-    } on ApiException catch (e) {
-      setState(() => _error = e.message);
     } catch (e) {
-      setState(() => _error = '오류가 발생했습니다: $e');
+      if (mounted) showErrorSnackBar(context, friendlyError(e));
     } finally {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _confirmDeleteSession(String sessionId, String filename) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('세션 삭제'),
+        content: Text('"$filename" 세션을 삭제하시겠습니까?\n생성된 카드도 모두 삭제됩니다.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              minimumSize: Size.zero,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            ),
+            child: const Text('삭제'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      _deleteSession(sessionId);
     }
   }
 
@@ -75,12 +142,9 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       await ApiService.deleteSession(sessionId);
       setState(() => _sessions.removeWhere((s) => s['id'] == sessionId));
+      if (mounted) showSuccessSnackBar(context, '세션이 삭제되었습니다.');
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('삭제 실패: $e')),
-        );
-      }
+      if (mounted) showErrorSnackBar(context, '삭제 실패: ${friendlyError(e)}');
     }
   }
 
@@ -111,6 +175,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _isLoading = true;
       _error = null;
     });
+    _startLoadingAnimation();
 
     try {
       late final SessionModel session;
@@ -134,11 +199,10 @@ class _HomeScreenState extends State<HomeScreen> {
         context,
         MaterialPageRoute(builder: (_) => ReviewScreen(session: session)),
       ).then((_) => _loadSessions());
-    } on ApiException catch (e) {
-      setState(() => _error = e.message);
     } catch (e) {
-      setState(() => _error = '오류가 발생했습니다: $e');
+      if (mounted) setState(() => _error = friendlyError(e));
     } finally {
+      _loadingTimer?.cancel();
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -177,10 +241,22 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
             ),
             const SizedBox(height: 12),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 400),
+              child: Text(
+                _loadingMessages[_loadingMessageIndex],
+                key: ValueKey<int>(_loadingMessageIndex),
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: cs.onSurfaceVariant,
+                    ),
+              ),
+            ),
+            const SizedBox(height: 8),
             Text(
-              'PDF를 분석하고 근거 포함 카드를 생성 중...\n약 15~30초 소요됩니다.',
+              '약 15~30초 소요됩니다.',
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: cs.onSurfaceVariant,
                   ),
             ),
@@ -191,179 +267,77 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildMain(ColorScheme cs) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // 다크모드 토글
-          Align(
-            alignment: Alignment.centerRight,
-            child: ValueListenableBuilder<ThemeMode>(
-              valueListenable: themeNotifier,
-              builder: (context, mode, _) {
-                final isDark = mode == ThemeMode.dark;
-                return IconButton(
-                  onPressed: () {
-                    themeNotifier.value =
-                        isDark ? ThemeMode.light : ThemeMode.dark;
-                  },
-                  icon: Icon(
-                    isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-                    color: cs.onSurfaceVariant,
-                  ),
-                  tooltip: isDark ? '라이트 모드' : '다크 모드',
-                );
-              },
-            ),
-          ),
-
-          // 로고 + 타이틀
-          Center(
-            child: Column(
-              children: [
-                Container(
-                  width: 64,
-                  height: 64,
-                  decoration: BoxDecoration(
-                    color: cs.primaryContainer,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child:
-                      Icon(Icons.style_rounded, size: 32, color: cs.primary),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  '데카드',
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'PDF 올리면 시험 대비 끝.\n근거 포함 암기카드를 자동으로 만들어드려요.',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: cs.onSurfaceVariant,
-                      ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 40),
-
-          // 1. PDF 업로드
-          Text(
-            '1. PDF 파일 선택',
-            style: Theme.of(context)
-                .textTheme
-                .titleMedium
-                ?.copyWith(fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 12),
-
-          InkWell(
-            onTap: _pickFile,
-            borderRadius: BorderRadius.circular(16),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: _hasFile ? cs.primary : cs.outlineVariant,
-                  width: _hasFile ? 2 : 1,
-                ),
-                borderRadius: BorderRadius.circular(16),
-                color: _hasFile
-                    ? cs.primaryContainer.withValues(alpha: 0.3)
-                    : null,
+    return RefreshIndicator(
+      onRefresh: _loadSessions,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 다크모드 토글
+            Align(
+              alignment: Alignment.centerRight,
+              child: ValueListenableBuilder<ThemeMode>(
+                valueListenable: themeNotifier,
+                builder: (context, mode, _) {
+                  final isDark = mode == ThemeMode.dark;
+                  return IconButton(
+                    onPressed: () {
+                      themeNotifier.value =
+                          isDark ? ThemeMode.light : ThemeMode.dark;
+                    },
+                    icon: Icon(
+                      isDark
+                          ? Icons.light_mode_rounded
+                          : Icons.dark_mode_rounded,
+                      color: cs.onSurfaceVariant,
+                    ),
+                    tooltip: isDark ? '라이트 모드' : '다크 모드',
+                  );
+                },
               ),
+            ),
+
+            // 로고 + 타이틀
+            Center(
               child: Column(
                 children: [
-                  Icon(
-                    _hasFile
-                        ? Icons.check_circle_rounded
-                        : Icons.upload_file_rounded,
-                    size: 40,
-                    color: _hasFile ? cs.primary : cs.onSurfaceVariant,
+                  Container(
+                    width: 64,
+                    height: 64,
+                    decoration: BoxDecoration(
+                      color: cs.primaryContainer,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Icon(Icons.style_rounded,
+                        size: 32, color: cs.primary),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
                   Text(
-                    _selectedFileName ?? '탭하여 PDF를 선택하세요',
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          color: _hasFile ? cs.primary : cs.onSurfaceVariant,
-                          fontWeight: _hasFile ? FontWeight.w600 : null,
+                    '데카드',
+                    style:
+                        Theme.of(context).textTheme.headlineMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'PDF 올리면 시험 대비 끝.\n근거 포함 암기카드를 자동으로 만들어드려요.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: cs.onSurfaceVariant,
                         ),
                   ),
-                  if (!_hasFile) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      '강의자료, 교재, 필기노트 등',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: cs.onSurfaceVariant,
-                          ),
-                    ),
-                  ],
                 ],
               ),
             ),
-          ),
 
-          const SizedBox(height: 32),
+            const SizedBox(height: 40),
 
-          // 2. 템플릿 선택
-          Text(
-            '2. 카드 유형 선택',
-            style: Theme.of(context)
-                .textTheme
-                .titleMedium
-                ?.copyWith(fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 12),
-
-          for (final t in _templateOptions)
-            _buildTemplateOption(cs,
-                value: t.$1, label: t.$2, desc: t.$3, icon: t.$4),
-
-          const SizedBox(height: 32),
-
-          // 에러
-          if (_error != null) ...[
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: cs.errorContainer,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.error_outline, color: cs.error, size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                      child: Text(_error!,
-                          style: TextStyle(color: cs.onErrorContainer))),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-
-          // 생성 버튼
-          FilledButton.icon(
-            onPressed: _hasFile ? _generate : null,
-            icon: const Icon(Icons.auto_awesome_rounded),
-            label: const Text('카드 만들기',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-          ),
-
-          const SizedBox(height: 40),
-
-          // 이전 기록 (최대 10개)
-          if (_sessions.isNotEmpty) ...[
+            // 1. PDF 업로드
             Text(
-              '이전 기록',
+              '1. PDF 파일 선택',
               style: Theme.of(context)
                   .textTheme
                   .titleMedium
@@ -371,11 +345,260 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 12),
 
-            for (final s in _sessions.take(10)) _buildSessionItem(cs, s),
+            InkWell(
+              onTap: _pickFile,
+              borderRadius: BorderRadius.circular(16),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: _hasFile ? cs.primary : cs.outlineVariant,
+                    width: _hasFile ? 2 : 1,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  color: _hasFile
+                      ? cs.primaryContainer.withValues(alpha: 0.3)
+                      : null,
+                ),
+                child: Column(
+                  children: [
+                    Icon(
+                      _hasFile
+                          ? Icons.check_circle_rounded
+                          : Icons.upload_file_rounded,
+                      size: 40,
+                      color: _hasFile ? cs.primary : cs.onSurfaceVariant,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      _selectedFileName ?? '탭하여 PDF를 선택하세요',
+                      style:
+                          Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                color: _hasFile
+                                    ? cs.primary
+                                    : cs.onSurfaceVariant,
+                                fontWeight:
+                                    _hasFile ? FontWeight.w600 : null,
+                              ),
+                    ),
+                    if (!_hasFile) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '강의자료, 교재, 필기노트 등',
+                        style:
+                            Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: cs.onSurfaceVariant,
+                                ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 32),
+
+            // 2. 템플릿 선택
+            Text(
+              '2. 카드 유형 선택',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 12),
+
+            for (final t in _templateOptions)
+              _buildTemplateOption(cs,
+                  value: t.$1, label: t.$2, desc: t.$3, icon: t.$4),
+
+            const SizedBox(height: 32),
+
+            // 에러
+            if (_error != null) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: cs.errorContainer,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.error_outline, color: cs.error, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                        child: Text(_error!,
+                            style:
+                                TextStyle(color: cs.onErrorContainer))),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // 생성 버튼
+            FilledButton.icon(
+              onPressed: _hasFile ? _generate : null,
+              icon: const Icon(Icons.auto_awesome_rounded),
+              label: const Text('카드 만들기',
+                  style:
+                      TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            ),
+
+            const SizedBox(height: 40),
+
+            // 이전 기록
+            _buildSessionsSection(cs),
 
             const SizedBox(height: 24),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSessionsSection(ColorScheme cs) {
+    // Loading state - skeleton
+    if (_sessionsLoading) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '이전 기록',
+            style: Theme.of(context)
+                .textTheme
+                .titleMedium
+                ?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 12),
+          for (int i = 0; i < 3; i++) _buildSkeletonItem(cs),
         ],
+      );
+    }
+
+    // Error state
+    if (_sessionsError) {
+      return Center(
+        child: Column(
+          children: [
+            Icon(Icons.cloud_off_rounded, size: 40, color: cs.onSurfaceVariant),
+            const SizedBox(height: 8),
+            Text('기록을 불러올 수 없습니다.',
+                style: TextStyle(color: cs.onSurfaceVariant)),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: _loadSessions,
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('다시 시도'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Empty state - onboarding tip
+    if (_sessions.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: cs.primaryContainer.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: cs.outlineVariant),
+        ),
+        child: Column(
+          children: [
+            Icon(Icons.lightbulb_outline_rounded,
+                size: 36, color: cs.primary),
+            const SizedBox(height: 12),
+            Text(
+              '이렇게 사용하세요',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleSmall
+                  ?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '1. 시험 범위 PDF를 업로드하세요\n'
+              '2. AI가 근거 포함 암기카드를 만들어요\n'
+              '3. 카드를 검수하고 학습하세요',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                    height: 1.6,
+                  ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Sessions list
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '이전 기록',
+          style: Theme.of(context)
+              .textTheme
+              .titleMedium
+              ?.copyWith(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 12),
+        for (final s in _sessions.take(10)) _buildSessionItem(cs, s),
+      ],
+    );
+  }
+
+  Widget _buildSkeletonItem(ColorScheme cs) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          border: Border.all(color: cs.outlineVariant),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerLow,
+                borderRadius: BorderRadius.circular(6),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    height: 14,
+                    width: 120,
+                    decoration: BoxDecoration(
+                      color: cs.surfaceContainerLow,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    height: 10,
+                    width: 80,
+                    decoration: BoxDecoration(
+                      color: cs.surfaceContainerLow,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -400,8 +623,20 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           child: Row(
             children: [
-              Icon(Icons.description_outlined,
-                  size: 24, color: cs.onSurfaceVariant),
+              // Template type icon
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: cs.primaryContainer.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  _templateIcon(templateType),
+                  size: 18,
+                  color: cs.primary,
+                ),
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -415,28 +650,64 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${_templateLabel(templateType)} · ${cardCount}장 · $timeAgo',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: cs.onSurfaceVariant,
-                          ),
+                      '${_templateLabel(templateType)} · $cardCount장 · $timeAgo',
+                      style:
+                          Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: cs.onSurfaceVariant,
+                              ),
                     ),
                   ],
                 ),
               ),
+              // Card count badge
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: cs.primaryContainer.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '$cardCount',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: cs.primary,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
               IconButton(
-                onPressed: () => _deleteSession(session['id'] as String),
+                onPressed: () => _confirmDeleteSession(
+                    session['id'] as String, filename),
                 icon: Icon(Icons.close_rounded,
                     size: 18, color: cs.onSurfaceVariant),
                 tooltip: '삭제',
                 visualDensity: VisualDensity.compact,
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                constraints:
+                    const BoxConstraints(minWidth: 32, minHeight: 32),
               ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  IconData _templateIcon(String type) {
+    switch (type) {
+      case 'definition':
+        return Icons.menu_book_rounded;
+      case 'cloze':
+        return Icons.edit_note_rounded;
+      case 'comparison':
+        return Icons.compare_arrows_rounded;
+      case 'subjective':
+        return Icons.draw_rounded;
+      default:
+        return Icons.description_outlined;
+    }
   }
 
   String _formatTimeAgo(DateTime dt) {
@@ -456,6 +727,8 @@ class _HomeScreenState extends State<HomeScreen> {
         return '빈칸형';
       case 'comparison':
         return '비교형';
+      case 'subjective':
+        return '주관식';
       default:
         return type;
     }
@@ -501,13 +774,16 @@ class _HomeScreenState extends State<HomeScreen> {
                             fontWeight: FontWeight.w600,
                             color: selected ? cs.primary : null)),
                     Text(desc,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: cs.onSurfaceVariant)),
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: cs.onSurfaceVariant)),
                   ],
                 ),
               ),
               if (selected)
-                Icon(Icons.check_circle_rounded, color: cs.primary, size: 22),
+                Icon(Icons.check_circle_rounded,
+                    color: cs.primary, size: 22),
             ],
           ),
         ),

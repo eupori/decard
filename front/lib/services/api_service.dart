@@ -1,11 +1,21 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
 import '../models/session_model.dart';
 import '../models/card_model.dart';
+import 'device_service.dart';
 
 class ApiService {
+  static Future<Map<String, String>> _headers() async {
+    final deviceId = await DeviceService.getDeviceId();
+    return {
+      'X-Device-ID': deviceId,
+    };
+  }
+
   /// PDF 업로드 + 카드 생성 (경로 기반 — 모바일/데스크톱)
   static Future<SessionModel> generate({
     required String filePath,
@@ -14,6 +24,7 @@ class ApiService {
   }) async {
     final uri = Uri.parse(ApiConfig.generateUrl);
     final request = http.MultipartRequest('POST', uri);
+    request.headers.addAll(await _headers());
 
     request.files.add(
       await http.MultipartFile.fromPath('file', filePath, filename: fileName),
@@ -31,6 +42,7 @@ class ApiService {
   }) async {
     final uri = Uri.parse(ApiConfig.generateUrl);
     final request = http.MultipartRequest('POST', uri);
+    request.headers.addAll(await _headers());
 
     request.files.add(
       http.MultipartFile.fromBytes('file', bytes, filename: fileName),
@@ -62,6 +74,7 @@ class ApiService {
   static Future<SessionModel> getSession(String sessionId) async {
     final response = await http.get(
       Uri.parse(ApiConfig.sessionUrl(sessionId)),
+      headers: await _headers(),
     );
 
     if (response.statusCode != 200) {
@@ -83,9 +96,11 @@ class ApiService {
     if (front != null) body['front'] = front;
     if (back != null) body['back'] = back;
 
+    final hdrs = await _headers();
+    hdrs['Content-Type'] = 'application/json';
     final response = await http.patch(
       Uri.parse(ApiConfig.cardUrl(cardId)),
-      headers: {'Content-Type': 'application/json'},
+      headers: hdrs,
       body: jsonEncode(body),
     );
 
@@ -100,6 +115,7 @@ class ApiService {
   static Future<int> acceptAll(String sessionId) async {
     final response = await http.post(
       Uri.parse(ApiConfig.acceptAllUrl(sessionId)),
+      headers: await _headers(),
     );
 
     if (response.statusCode != 200) {
@@ -114,6 +130,7 @@ class ApiService {
   static Future<List<Map<String, dynamic>>> listSessions() async {
     final response = await http.get(
       Uri.parse(ApiConfig.sessionsUrl),
+      headers: await _headers(),
     );
 
     if (response.statusCode != 200) {
@@ -128,11 +145,50 @@ class ApiService {
   static Future<void> deleteSession(String sessionId) async {
     final response = await http.delete(
       Uri.parse(ApiConfig.sessionUrl(sessionId)),
+      headers: await _headers(),
     );
 
     if (response.statusCode != 200) {
       throw ApiException('삭제에 실패했습니다.', response.statusCode);
     }
+  }
+
+  /// AI 채점 (텍스트 + 선택적 손글씨 이미지)
+  static Future<Map<String, dynamic>> gradeCard({
+    required String cardId,
+    required String userAnswer,
+    Uint8List? drawingImage,
+  }) async {
+    final uri = Uri.parse(ApiConfig.gradeUrl(cardId));
+    final request = http.MultipartRequest('POST', uri);
+    request.headers.addAll(await _headers());
+
+    request.fields['user_answer'] = userAnswer;
+
+    if (drawingImage != null) {
+      request.files.add(
+        http.MultipartFile.fromBytes(
+          'drawing',
+          drawingImage,
+          filename: 'drawing.png',
+        ),
+      );
+    }
+
+    final streamedResponse = await request.send().timeout(
+          const Duration(seconds: 30),
+        );
+    final response = await http.Response.fromStream(streamedResponse);
+
+    if (response.statusCode != 200) {
+      final body = jsonDecode(response.body);
+      throw ApiException(
+        body['detail'] as String? ?? '채점에 실패했습니다.',
+        response.statusCode,
+      );
+    }
+
+    return jsonDecode(response.body) as Map<String, dynamic>;
   }
 }
 
@@ -144,4 +200,11 @@ class ApiException implements Exception {
 
   @override
   String toString() => message;
+}
+
+String friendlyError(Object e) {
+  if (e is ApiException) return e.message;
+  if (e is TimeoutException) return '서버 응답이 너무 오래 걸립니다. 잠시 후 다시 시도해주세요.';
+  if (e is SocketException) return '서버에 연결할 수 없습니다. 인터넷 연결을 확인해주세요.';
+  return '오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
 }
