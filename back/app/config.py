@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     APP_ENV: str = "dev"
 
-    # Claude CLI
+    # Claude Code CLI
     LLM_MODEL: str = "claude-sonnet-4-5-20250929"
     CLAUDE_TIMEOUT_SECONDS: int = 180
 

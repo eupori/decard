@@ -13,7 +13,7 @@ async def run_claude(
     model: str | None = None,
     tools: str = "",
 ) -> str:
-    """Claude Code CLI `-p` 모드로 AI 호출. API 키 불필요."""
+    """Claude Code CLI `-p` 모드로 AI 호출."""
 
     cmd = ["claude", "-p", "--output-format", "text"]
 
@@ -26,8 +26,9 @@ async def run_claude(
     if tools:
         cmd += ["--tools", tools]
 
-    # 중첩 실행 차단 우회: CLAUDE_CODE 관련 env 키 제거
-    env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDECODE")}
+    # 중첩 실행 차단 우회: CLAUDECODE 키만 제거
+    # CLAUDE_CODE_OAUTH_TOKEN 등 인증 관련 env는 유지
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
     logger.debug("CLI 실행: %s", " ".join(cmd))
 
