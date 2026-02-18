@@ -171,10 +171,13 @@ decard/
 
 ```
 PDF 업로드 → pdfplumber 텍스트 추출 (페이지별)
-  → 5페이지씩 청크 분할
-  → asyncio.gather로 병렬 Claude API 호출
-  → JSON 파싱 + 필수 필드 검증
-  → DB 저장 (Session + Cards)
+  → 세션 생성 (status=processing) → 즉시 반환
+  → asyncio.create_task로 백그라운드 실행:
+    → 5페이지씩 청크 분할
+    → asyncio.gather로 병렬 Claude API 호출
+    → JSON 파싱 + 필수 필드 검증
+    → DB 저장 (Cards) + status=completed (실패 시 status=failed)
+  → 프론트: 포그라운드 대기 (5초 폴링) 또는 홈 복귀 (10초 폴링)
 ```
 
 ### 테마 시스템
@@ -242,6 +245,8 @@ static const String baseUrl = String.fromEnvironment(
 8. **`.env`와 `decard.db`**: 절대 커밋 금지
 9. **카카오 Redirect URI**: 카카오 콘솔 > 앱 > 플랫폼 키 > REST API 키 클릭 > 카카오 로그인 리다이렉트 URI에서 설정
 10. **Flutter web_auth**: `package:web` 사용 (dart:html deprecated). `history.replaceState` 대신 `location.hash = ''` 사용 (Flutter 히스토리 충돌 방지)
+11. **백그라운드 태스크와 --reload**: `uvicorn --reload`가 코드 변경 감지 시 워커를 재시작하면 `asyncio.create_task`로 생성된 백그라운드 태스크가 소멸됨. 프로덕션에서는 `--reload` 없으므로 문제없음. 로컬 테스트 중 코드 수정 시 processing 세션이 stuck될 수 있음
+12. **UTC 시간**: models.py에서 `datetime.utcnow`로 저장. API 응답에서 `isoformat() + "Z"` 필수 (프론트 DateTime.tryParse가 Z를 보고 UTC로 파싱)
 
 ---
 
@@ -260,22 +265,32 @@ static const String baseUrl = String.fromEnvironment(
 - 빈칸(Cloze) 스타일링 위젯
 - AI 채점 (주관식)
 
-### Phase 2: 카카오 로그인 (현재)
+### Phase 2: 카카오 로그인
 - 카카오 OAuth 로그인 (REST API 직접, JWT 7일)
 - 로그인 화면 (카카오 동작 + Google/Apple/이메일 목업)
 - 듀얼 인증 (JWT user_id 우선, device_id 폴백)
 - 디바이스 세션 마이그레이션 (로그인 시 자동)
 - 프로덕션 배포 완료
 
+### Phase 2.5: 백그라운드 카드 생성 (현재)
+- POST /generate 즉시 반환 (status=processing) + asyncio 백그라운드 생성
+- 포그라운드/백그라운드 선택 UX (업로드 → 선택지 → 대기 or 홈 복귀)
+- 포그라운드 대기: 원형 프로그레스(%) + 예상 시간 + 감성 문구 로테이션 → 완료 시 ReviewScreen 자동 이동
+- 백그라운드 대기: 홈에서 10초 폴링 + 완료 시 스낵바 알림
+- 세션 목록에 processing/failed 상태 UI (스피너/에러 아이콘)
+- UTC 시간 버그 수정 (isoformat + "Z" 접미사)
+- 프로덕션 배포 완료
+
 ---
 
-## 다음 작업 후보 (Phase 2.5~3)
+## 다음 작업 후보 (Phase 3~)
 
 | 우선순위 | 작업 | 설명 |
 |----------|------|------|
-| 1 | 콘시어지 테스트 배포 | 테스터에게 링크 공유 + 피드백 폼 |
-| 2 | APK 업데이트 | 로그인 반영된 Android APK 빌드 |
-| 3 | Google Play Store 등록 | 앱 이름, 설명, 스크린샷 |
-| 4 | SRS 반복학습 | 간격 반복 알고리즘 (SM-2 등) |
-| 5 | 이메일 회원가입 | 카카오 없는 유저 대응 |
-| 6 | Google/Apple 로그인 | 실제 구현 (현재 목업) |
+| 1 | 보관함 | 세션/카드 보관 및 관리 기능 |
+| 2 | 콘시어지 테스트 배포 | 테스터에게 링크 공유 + 피드백 폼 |
+| 3 | APK 업데이트 | 로그인 반영된 Android APK 빌드 |
+| 4 | Google Play Store 등록 | 앱 이름, 설명, 스크린샷 |
+| 5 | SRS 반복학습 | 간격 반복 알고리즘 (SM-2 등) |
+| 6 | 이메일 회원가입 | 카카오 없는 유저 대응 |
+| 7 | Google/Apple 로그인 | 실제 구현 (현재 목업) |
