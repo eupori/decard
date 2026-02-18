@@ -1,9 +1,11 @@
+import asyncio
 import json
 import logging
 from typing import List, Dict
 
 from .config import settings
 from .claude_cli import run_claude
+from .review_service import review_cards
 
 logger = logging.getLogger(__name__)
 
@@ -18,12 +20,25 @@ TEMPLATE_INSTRUCTIONS = {
 """,
 
     "cloze": """빈칸형 카드를 만드세요.
-- 앞면: 핵심 키워드를 _____로 대체한 문장
-- 뒷면: 빈칸에 들어갈 정답 (단어 또는 짧은 구)
+- 앞면: 문장에서 **핵심 전문 용어/개념**을 _____로 대체
+- 뒷면: 빈칸에 들어갈 정답 (정확한 용어)
 
-예시:
+## 빈칸 규칙 (매우 중요)
+1. 빈칸은 반드시 **시험에 출제될 핵심 전문 용어, 고유명사, 학술 개념**이어야 합니다.
+2. "할 수", "있게", "하는" 같은 일반적인 조사/동사를 빈칸으로 만들지 마세요.
+3. 빈칸의 정답이 **하나로 특정**되어야 합니다. 여러 답이 가능한 빈칸은 만들지 마세요.
+4. 문장만 읽고도 정답을 유추할 수 있을 정도로 **충분한 맥락**을 포함하세요.
+
+좋은 예시:
 - 앞면: "피아제의 인지발달 단계 중 _____기는 출생부터 약 2세까지의 시기이다."
 - 뒷면: "감각운동"
+
+- 앞면: "에릭슨의 심리사회적 발달 이론에서 영아기의 핵심 과업은 _____이다."
+- 뒷면: "기본적 신뢰감 대 불신감"
+
+나쁜 예시 (절대 이렇게 만들지 마세요):
+- 앞면: "효과적인 한계 설정을 위해 규칙은 _____ 유지되어야 한다." → 답이 여러 개 가능
+- 앞면: "자아통제는 타인의 요구에 _____ 하는 수준이다." → 빈칸이 핵심 용어가 아님
 """,
 
     "comparison": """비교형 카드를 만드세요.
@@ -98,13 +113,11 @@ def _parse_cards_json(text: str) -> List[Dict]:
     """Claude 응답에서 JSON 카드 배열을 추출합니다."""
     content = text.strip()
 
-    # 마크다운 코드블록 제거
     if "```json" in content:
         content = content.split("```json", 1)[1].split("```", 1)[0]
     elif "```" in content:
         content = content.split("```", 1)[1].split("```", 1)[0]
 
-    # [ 로 시작하는 JSON 배열 찾기
     start = content.find("[")
     end = content.rfind("]")
     if start == -1 or end == -1:
@@ -138,18 +151,14 @@ async def _generate_chunk(pages: List[Dict], template_type: str) -> List[Dict]:
     return validated
 
 
-import asyncio
-
 CHUNK_SIZE = 5  # 5페이지씩 분할
 
 
 async def generate_cards(pages: List[Dict], template_type: str = "definition") -> List[Dict]:
-    """PDF 텍스트에서 Claude를 이용해 암기카드를 생성합니다. 청크 병렬 처리."""
+    """PDF 텍스트에서 Claude를 이용해 암기카드를 생성합니다. 청크 병렬 처리 + 3단계 검수."""
     if len(pages) <= CHUNK_SIZE:
-        # 짧은 PDF는 그냥 한번에
         result = await _generate_chunk(pages, template_type)
     else:
-        # 긴 PDF는 청크로 나눠서 병렬 호출
         chunks = [pages[i:i + CHUNK_SIZE] for i in range(0, len(pages), CHUNK_SIZE)]
         logger.info("PDF %d페이지 → %d청크 병렬 처리", len(pages), len(chunks))
 
@@ -166,4 +175,13 @@ async def generate_cards(pages: List[Dict], template_type: str = "definition") -
     if not result:
         raise ValueError("생성된 카드가 없습니다. PDF 내용을 확인해주세요.")
 
+    # 3단계 페르소나 검수 (교수 → 출제위원 → 수험생)
+    source_text = _build_user_prompt(pages)
+    logger.info("카드 검수 시작: %d장", len(result))
+    result = await review_cards(result, source_text, template_type)
+
+    if not result:
+        raise ValueError("검수 후 유효한 카드가 없습니다. PDF 내용을 확인해주세요.")
+
+    logger.info("최종 카드: %d장 (검수 완료)", len(result))
     return result
