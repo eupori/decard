@@ -150,10 +150,9 @@ async def review_cards(
 
     card_count_before = len(cards)
 
-    # 3개 페르소나 병렬 호출
+    # 교수 1명만 검수 (프로덕션 속도 최적화)
     tasks = [
-        _run_single_review(persona, cards, source_text, template_type)
-        for persona in REVIEW_PERSONAS
+        _run_single_review(REVIEW_PERSONAS[0], cards, source_text, template_type)
     ]
     raw_results = await asyncio.gather(*tasks, return_exceptions=True)
 

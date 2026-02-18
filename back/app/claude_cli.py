@@ -6,6 +6,9 @@ from .config import settings
 
 logger = logging.getLogger(__name__)
 
+# Claude CLI는 Node.js 프로세스 — 동시 실행 수 제한 (메모리 보호)
+_cli_semaphore = asyncio.Semaphore(2)
+
 
 async def run_claude(
     system_prompt: str,
@@ -30,7 +33,14 @@ async def run_claude(
     # CLAUDE_CODE_OAUTH_TOKEN 등 인증 관련 env는 유지
     env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
-    logger.debug("CLI 실행: %s", " ".join(cmd))
+    logger.debug("CLI 실행 대기: %s", " ".join(cmd))
+
+    async with _cli_semaphore:
+        return await _run_cli(cmd, env, user_prompt)
+
+
+async def _run_cli(cmd: list, env: dict, user_prompt: str) -> str:
+    logger.debug("CLI 실행 시작")
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,

@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import '../main.dart' show themeNotifier;
-import '../models/session_model.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../utils/snackbar_helper.dart';
@@ -26,8 +25,31 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _selectedFileName;
   Uint8List? _selectedFileBytes;
   String _templateType = 'definition';
-  bool _isLoading = false;
   String? _error;
+
+  // Generate overlay state
+  bool _showGenerating = false;
+  bool _uploadDone = false;
+  bool _waitingHere = false;
+  String? _generatedSessionId;
+  int _generatedPageCount = 0;
+  int _tipIndex = 0;
+  Timer? _tipTimer;
+  Timer? _progressTimer;
+  double _progress = 0.0;
+  int _elapsedSeconds = 0;
+
+  final _tips = [
+    'PDF 꼼꼼히 읽는 중...',
+    '중요한 내용 밑줄 긋는 중...',
+    '문제 카드에 적는 중...',
+    '카드 모양 자르는 중...',
+    '흩어진 카드 모으는 중...',
+    '근거 페이지 찾아 붙이는 중...',
+    '머릿속에 지식 넣는 중...',
+    '시험에 나올 것만 골라내는 중...',
+    '거의 다 됐어요, 조금만요...',
+  ];
 
   List<Map<String, dynamic>> _sessions = [];
   bool _sessionsLoading = true;
@@ -37,16 +59,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isLoggedIn = false;
   Map<String, dynamic>? _user;
 
-  // Loading animation
-  int _loadingMessageIndex = 0;
-  Timer? _loadingTimer;
-  final _loadingMessages = [
-    'PDF 분석 중...',
-    '텍스트 추출 중...',
-    '카드 생성 중...',
-    '근거 매칭 중...',
-    '거의 완료...',
-  ];
+  // Polling for processing sessions
+  Timer? _pollingTimer;
 
   final _templateOptions = [
     ('definition', '정의형', 'OO란? 형태의 Q&A', Icons.menu_book_rounded),
@@ -68,7 +82,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    _loadingTimer?.cancel();
+    _pollingTimer?.cancel();
+    _tipTimer?.cancel();
+    _progressTimer?.cancel();
     super.dispose();
   }
 
@@ -135,19 +151,136 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) showSuccessSnackBar(context, '로그아웃되었습니다.');
   }
 
-  void _startLoadingAnimation() {
-    _loadingMessageIndex = 0;
-    _loadingTimer?.cancel();
-    _loadingTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
-      if (mounted && _isLoading) {
-        setState(() {
-          _loadingMessageIndex =
-              (_loadingMessageIndex + 1) % _loadingMessages.length;
-        });
-      } else {
-        timer.cancel();
+  int get _estimatedSeconds => (_generatedPageCount * 20).clamp(60, 600);
+
+  String get _estimatedTimeLabel {
+    final minutes = (_estimatedSeconds / 60).ceil();
+    return '약 $minutes분 소요';
+  }
+
+  void _startWaitingHere() {
+    _elapsedSeconds = 0;
+    _progress = 0.0;
+
+    setState(() => _waitingHere = true);
+
+    // 문구 로테이션
+    _tipIndex = 0;
+    _tipTimer?.cancel();
+    _tipTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (mounted && _waitingHere) {
+        setState(() => _tipIndex = (_tipIndex + 1) % _tips.length);
       }
     });
+
+    // 프로그레스 바 (1초마다 업데이트, 최대 90%까지)
+    _progressTimer?.cancel();
+    _progressTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && _waitingHere) {
+        _elapsedSeconds++;
+        setState(() {
+          _progress = (_elapsedSeconds / _estimatedSeconds).clamp(0.0, 0.9);
+        });
+      }
+    });
+
+    // 완료 폴링 (5초 간격)
+    _pollUntilDone();
+  }
+
+  Future<void> _pollUntilDone() async {
+    while (mounted && _waitingHere && _generatedSessionId != null) {
+      await Future.delayed(const Duration(seconds: 5));
+      if (!mounted || !_waitingHere) return;
+
+      try {
+        final sessions = await ApiService.listSessions();
+        final target = sessions.firstWhere(
+          (s) => s['id'] == _generatedSessionId,
+          orElse: () => <String, dynamic>{},
+        );
+
+        if (target.isEmpty) continue;
+
+        final status = target['status'] as String?;
+        if (status == 'completed') {
+          _tipTimer?.cancel();
+          _progressTimer?.cancel();
+          if (!mounted) return;
+
+          final session = await ApiService.getSession(_generatedSessionId!);
+          if (!mounted) return;
+
+          setState(() {
+            _showGenerating = false;
+            _waitingHere = false;
+          });
+
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => ReviewScreen(session: session)),
+          ).then((_) => _loadSessions());
+          return;
+        } else if (status == 'failed') {
+          _tipTimer?.cancel();
+          _progressTimer?.cancel();
+          if (!mounted) return;
+          setState(() {
+            _showGenerating = false;
+            _waitingHere = false;
+          });
+          showErrorSnackBar(context, '카드 생성에 실패했습니다. 다른 PDF로 시도해주세요.');
+          _loadSessions();
+          return;
+        }
+      } catch (_) {
+        // 폴링 실패는 무시, 다음 주기에 재시도
+      }
+    }
+  }
+
+  void _startPollingIfNeeded() {
+    final hasProcessing = _sessions.any((s) => s['status'] == 'processing');
+    if (hasProcessing && _pollingTimer == null) {
+      _pollingTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+        _pollSessions();
+      });
+    } else if (!hasProcessing && _pollingTimer != null) {
+      _pollingTimer?.cancel();
+      _pollingTimer = null;
+    }
+  }
+
+  Future<void> _pollSessions() async {
+    // 이전 processing 세션 ID들 기억
+    final previousProcessing = _sessions
+        .where((s) => s['status'] == 'processing')
+        .map((s) => s['id'] as String)
+        .toSet();
+
+    try {
+      final sessions = await ApiService.listSessions();
+      if (!mounted) return;
+      setState(() => _sessions = sessions);
+
+      // processing → completed로 바뀐 세션 감지
+      for (final id in previousProcessing) {
+        final updated = sessions.firstWhere(
+          (s) => s['id'] == id,
+          orElse: () => <String, dynamic>{},
+        );
+        if (updated.isNotEmpty && updated['status'] == 'completed') {
+          final cardCount = updated['card_count'] as int;
+          if (mounted) {
+            showSuccessSnackBar(context, '카드 $cardCount장이 생성되었습니다!');
+          }
+        }
+      }
+
+      _startPollingIfNeeded();
+    } catch (_) {
+      // 폴링 실패는 무시 (다음 주기에 재시도)
+    }
   }
 
   Future<void> _loadSessions() async {
@@ -157,7 +290,10 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     try {
       final sessions = await ApiService.listSessions();
-      if (mounted) setState(() => _sessions = sessions);
+      if (mounted) {
+        setState(() => _sessions = sessions);
+        _startPollingIfNeeded();
+      }
     } catch (_) {
       if (mounted) setState(() => _sessionsError = true);
     } finally {
@@ -166,7 +302,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _openSession(String sessionId) async {
-    setState(() => _isLoading = true);
     try {
       final session = await ApiService.getSession(sessionId);
       if (!mounted) return;
@@ -176,8 +311,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ).then((_) => _loadSessions());
     } catch (e) {
       if (mounted) showErrorSnackBar(context, friendlyError(e));
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -245,21 +378,21 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     setState(() {
-      _isLoading = true;
       _error = null;
+      _showGenerating = true;
+      _uploadDone = false;
     });
-    _startLoadingAnimation();
 
     try {
-      late final SessionModel session;
+      late final dynamic result;
       if (kIsWeb && _selectedFileBytes != null) {
-        session = await ApiService.generateFromBytes(
+        result = await ApiService.generateFromBytes(
           bytes: _selectedFileBytes!,
           fileName: _selectedFileName!,
           templateType: _templateType,
         );
       } else {
-        session = await ApiService.generate(
+        result = await ApiService.generate(
           filePath: _selectedFilePath!,
           fileName: _selectedFileName!,
           templateType: _templateType,
@@ -268,15 +401,22 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (!mounted) return;
 
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => ReviewScreen(session: session)),
-      ).then((_) => _loadSessions());
+      // 업로드 성공 → 안내 화면으로 전환
+      setState(() {
+        _uploadDone = true;
+        _generatedSessionId = result.id;
+        _generatedPageCount = result.pageCount;
+        _selectedFilePath = null;
+        _selectedFileName = null;
+        _selectedFileBytes = null;
+      });
     } catch (e) {
-      if (mounted) setState(() => _error = friendlyError(e));
-    } finally {
-      _loadingTimer?.cancel();
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() {
+          _showGenerating = false;
+          _error = friendlyError(e);
+        });
+      }
     }
   }
 
@@ -286,53 +426,172 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       body: SafeArea(
-        child: _isLoading ? _buildLoading(cs) : _buildMain(cs),
+        child: _showGenerating ? _buildGenerating(cs) : _buildMain(cs),
       ),
     );
   }
 
-  Widget _buildLoading(ColorScheme cs) {
+  Widget _buildGenerating(ColorScheme cs) {
+    // 단계 3: 포그라운드 대기 (프로그레스 + 감성 문구)
+    if (_waitingHere) {
+      final percent = (_progress * 100).toInt();
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 프로그레스 원형
+              SizedBox(
+                width: 80,
+                height: 80,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    SizedBox(
+                      width: 80,
+                      height: 80,
+                      child: CircularProgressIndicator(
+                        value: _progress,
+                        strokeWidth: 4,
+                        color: cs.primary,
+                        backgroundColor: cs.outlineVariant.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    Text(
+                      '$percent%',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: cs.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 28),
+              Text(
+                '카드를 만들고 있어요',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '$_estimatedTimeLabel · $_generatedPageCount페이지',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: cs.onSurfaceVariant,
+                    ),
+              ),
+              const SizedBox(height: 32),
+              // 감성 문구
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 400),
+                child: Text(
+                  _tips[_tipIndex],
+                  key: ValueKey<int>(_tipIndex),
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                ),
+              ),
+              const SizedBox(height: 32),
+              OutlinedButton.icon(
+                onPressed: () {
+                  _tipTimer?.cancel();
+                  _progressTimer?.cancel();
+                  setState(() {
+                    _waitingHere = false;
+                    _showGenerating = false;
+                  });
+                  _loadSessions();
+                  showSuccessSnackBar(context, '완료되면 알려드릴게요!');
+                },
+                icon: const Icon(Icons.home_rounded, size: 18),
+                label: const Text('홈에서 기다릴게요'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: Size.zero,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 20, vertical: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // 단계 1~2: 업로드 중 → 선택지
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            SizedBox(
-              width: 64,
-              height: 64,
-              child: CircularProgressIndicator(
-                strokeWidth: 3,
-                color: cs.primary,
-              ),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 400),
+              child: _uploadDone
+                  ? Icon(Icons.check_circle_rounded,
+                      key: const ValueKey('done'),
+                      size: 64,
+                      color: cs.primary)
+                  : SizedBox(
+                      key: const ValueKey('loading'),
+                      width: 64,
+                      height: 64,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 3,
+                        color: cs.primary,
+                      ),
+                    ),
             ),
             const SizedBox(height: 32),
             Text(
-              '카드를 만들고 있어요',
+              _uploadDone ? '카드 생성이 시작되었어요!' : '업로드 중...',
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
             ),
             const SizedBox(height: 12),
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 400),
-              child: Text(
-                _loadingMessages[_loadingMessageIndex],
-                key: ValueKey<int>(_loadingMessageIndex),
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: cs.onSurfaceVariant,
-                    ),
-              ),
-            ),
-            const SizedBox(height: 8),
             Text(
-              '약 15~30초 소요됩니다.',
+              _uploadDone
+                  ? '백그라운드에서 카드를 만들고 있어요.\n어떻게 하시겠어요?'
+                  : 'PDF를 분석하고 있어요...',
               textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: cs.onSurfaceVariant,
+                    height: 1.5,
                   ),
             ),
+            if (_uploadDone) ...[
+              const SizedBox(height: 40),
+              FilledButton.icon(
+                onPressed: _startWaitingHere,
+                icon: const Icon(Icons.hourglass_top_rounded),
+                label: const Text('여기서 기다릴게요'),
+                style: FilledButton.styleFrom(
+                  minimumSize: Size.zero,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 24, vertical: 14),
+                ),
+              ),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: () {
+                  setState(() => _showGenerating = false);
+                  _loadSessions();
+                  showSuccessSnackBar(context, '완료되면 알려드릴게요!');
+                },
+                icon: const Icon(Icons.home_rounded),
+                label: const Text('홈으로 돌아가기'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: Size.zero,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 24, vertical: 14),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -689,35 +948,69 @@ class _HomeScreenState extends State<HomeScreen> {
     final filename = (session['filename'] as String).replaceAll('.pdf', '');
     final cardCount = session['card_count'] as int;
     final templateType = session['template_type'] as String;
+    final status = session['status'] as String? ?? 'completed';
     final createdAt = DateTime.tryParse(session['created_at'] as String);
     final timeAgo = createdAt != null ? _formatTimeAgo(createdAt) : '';
+    final isProcessing = status == 'processing';
+    final isFailed = status == 'failed';
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: InkWell(
-        onTap: () => _openSession(session['id'] as String),
+        onTap: () {
+          if (isProcessing) {
+            showInfoSnackBar(context, '아직 카드를 생성하고 있습니다. 잠시만 기다려주세요.');
+          } else if (isFailed) {
+            showErrorSnackBar(context, '카드 생성에 실패한 세션입니다.');
+          } else {
+            _openSession(session['id'] as String);
+          }
+        },
         borderRadius: BorderRadius.circular(12),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
-            border: Border.all(color: cs.outlineVariant),
+            border: Border.all(
+              color: isFailed
+                  ? cs.error.withValues(alpha: 0.5)
+                  : isProcessing
+                      ? cs.primary.withValues(alpha: 0.3)
+                      : cs.outlineVariant,
+            ),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Row(
             children: [
-              // Template type icon
+              // Template type icon / status icon
               Container(
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: cs.primaryContainer.withValues(alpha: 0.5),
+                  color: isFailed
+                      ? cs.errorContainer.withValues(alpha: 0.5)
+                      : cs.primaryContainer.withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(
-                  _templateIcon(templateType),
-                  size: 18,
-                  color: cs.primary,
-                ),
+                child: isFailed
+                    ? Icon(Icons.error_outline_rounded,
+                        size: 18, color: cs.error)
+                    : isProcessing
+                        ? SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: Padding(
+                              padding: const EdgeInsets.all(9),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: cs.primary,
+                              ),
+                            ),
+                          )
+                        : Icon(
+                            _templateIcon(templateType),
+                            size: 18,
+                            color: cs.primary,
+                          ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -726,38 +1019,57 @@ class _HomeScreenState extends State<HomeScreen> {
                   children: [
                     Text(
                       filename,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: isFailed ? cs.onSurfaceVariant : null,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${_templateLabel(templateType)} · $cardCount장 · $timeAgo',
+                      isProcessing
+                          ? '생성 중... · $timeAgo'
+                          : isFailed
+                              ? '생성 실패 · $timeAgo'
+                              : '${_templateLabel(templateType)} · $cardCount장 · $timeAgo',
                       style:
                           Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: cs.onSurfaceVariant,
+                                color: isFailed
+                                    ? cs.error
+                                    : cs.onSurfaceVariant,
                               ),
                     ),
                   ],
                 ),
               ),
-              // Card count badge
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: cs.primaryContainer.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  '$cardCount',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+              // Card count badge or status indicator
+              if (isProcessing)
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
                     color: cs.primary,
                   ),
+                )
+              else if (!isFailed)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: cs.primaryContainer.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    '$cardCount',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: cs.primary,
+                    ),
+                  ),
                 ),
-              ),
               const SizedBox(width: 4),
               IconButton(
                 onPressed: () => _confirmDeleteSession(

@@ -1,3 +1,4 @@
+import asyncio
 import csv
 import io
 import logging
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from .auth import get_device_id, get_owner_filter, get_owner_id
 from .config import settings
-from .database import get_db
+from .database import get_db, SessionLocal
 from .models import (
     SessionModel, CardModel, GradeModel,
     CardResponse, CardUpdate, SessionResponse, GradeResponse,
@@ -68,23 +69,12 @@ async def generate(
     db.commit()
     db.refresh(session)
 
-    try:
-        cards_data = await generate_cards(pages, template_type)
+    # 백그라운드에서 카드 생성 (즉시 반환)
+    asyncio.create_task(
+        _generate_in_background(session.id, pages, template_type)
+    )
 
-        for card_data in cards_data:
-            db.add(CardModel(session_id=session.id, **card_data))
-
-        session.status = "completed"
-        db.commit()
-        db.refresh(session)
-
-        return _build_session_response(session)
-
-    except Exception as e:
-        logger.exception("카드 생성 실패: session=%s", session.id)
-        session.status = "failed"
-        db.commit()
-        raise HTTPException(500, _safe_error("카드 생성에 실패했습니다", e))
+    return _build_session_response(session)
 
 
 # ──────────────────────────────────────
@@ -94,7 +84,9 @@ async def generate(
 @router.get("/sessions")
 def list_sessions(request: Request, db: Session = Depends(get_db)):
     owner_filter = get_owner_filter(request)
-    query = db.query(SessionModel).filter(SessionModel.status == "completed")
+    query = db.query(SessionModel).filter(
+        SessionModel.status.in_(["completed", "processing", "failed"])
+    )
     sessions = (
         owner_filter(query)
         .order_by(SessionModel.created_at.desc())
@@ -107,8 +99,9 @@ def list_sessions(request: Request, db: Session = Depends(get_db)):
             "filename": s.filename,
             "page_count": s.page_count,
             "template_type": s.template_type,
+            "status": s.status,
             "card_count": len(s.cards),
-            "created_at": s.created_at.isoformat(),
+            "created_at": s.created_at.isoformat() + "Z",
         }
         for s in sessions
     ]
@@ -291,6 +284,36 @@ def download_csv(session_id: str, request: Request, db: Session = Depends(get_db
 # Helpers
 # ──────────────────────────────────────
 
+async def _generate_in_background(
+    session_id: str,
+    pages: list[dict],
+    template_type: str,
+) -> None:
+    """Request 스코프 밖에서 별도 DB 세션으로 카드 생성."""
+    db = SessionLocal()
+    try:
+        cards_data = await generate_cards(pages, template_type)
+        session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+        if not session:
+            logger.error("백그라운드 생성: 세션 없음 session=%s", session_id)
+            return
+
+        for card_data in cards_data:
+            db.add(CardModel(session_id=session.id, **card_data))
+
+        session.status = "completed"
+        db.commit()
+        logger.info("백그라운드 생성 완료: session=%s, cards=%d", session_id, len(cards_data))
+    except Exception:
+        logger.exception("백그라운드 카드 생성 실패: session=%s", session_id)
+        session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+        if session:
+            session.status = "failed"
+            db.commit()
+    finally:
+        db.close()
+
+
 def _safe_error(detail: str, exc: Exception) -> str:
     """Hide internal error details in production."""
     if settings.APP_ENV == "dev":
@@ -325,7 +348,7 @@ def _build_session_response(session: SessionModel) -> dict:
         "page_count": session.page_count,
         "template_type": session.template_type,
         "status": session.status,
-        "created_at": session.created_at.isoformat(),
+        "created_at": session.created_at.isoformat() + "Z",
         "cards": cards,
         "stats": stats,
     }

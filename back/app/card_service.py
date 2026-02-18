@@ -132,7 +132,11 @@ async def _generate_chunk(pages: List[Dict], template_type: str) -> List[Dict]:
     user_prompt = _build_user_prompt(pages)
 
     raw_text = await run_claude(system_prompt, user_prompt, model=settings.LLM_MODEL)
-    cards_raw = _parse_cards_json(raw_text)
+    try:
+        cards_raw = _parse_cards_json(raw_text)
+    except (ValueError, json.JSONDecodeError) as e:
+        logger.error("카드 JSON 파싱 실패: %s | 응답 앞 500자: %s", e, raw_text[:500])
+        raise
 
     validated = []
     for card in cards_raw:

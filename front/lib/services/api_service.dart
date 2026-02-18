@@ -62,14 +62,13 @@ class ApiService {
   static Future<SessionModel> _sendGenerateRequest(
       http.MultipartRequest request) async {
     final streamedResponse = await request.send().timeout(
-          const Duration(seconds: 120),
+          const Duration(seconds: 600),
         );
     final response = await http.Response.fromStream(streamedResponse);
 
     if (response.statusCode != 200) {
-      final body = jsonDecode(response.body);
       throw ApiException(
-        body['detail'] as String? ?? '카드 생성에 실패했습니다.',
+        _extractDetail(response.body) ?? '카드 생성에 실패했습니다.',
         response.statusCode,
       );
     }
@@ -188,14 +187,23 @@ class ApiService {
     final response = await http.Response.fromStream(streamedResponse);
 
     if (response.statusCode != 200) {
-      final body = jsonDecode(response.body);
       throw ApiException(
-        body['detail'] as String? ?? '채점에 실패했습니다.',
+        _extractDetail(response.body) ?? '채점에 실패했습니다.',
         response.statusCode,
       );
     }
 
     return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+}
+
+/// JSON body에서 detail 필드 추출 (nginx HTML 에러 페이지 등 비-JSON 응답 안전 처리)
+String? _extractDetail(String body) {
+  try {
+    final json = jsonDecode(body);
+    return json['detail'] as String?;
+  } catch (_) {
+    return null;
   }
 }
 
