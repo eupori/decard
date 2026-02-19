@@ -7,7 +7,7 @@ from .config import settings
 logger = logging.getLogger(__name__)
 
 # Claude CLI는 Node.js 프로세스 — 동시 실행 수 제한 (메모리 보호)
-_cli_semaphore = asyncio.Semaphore(2)
+_cli_semaphore = asyncio.Semaphore(3)
 
 
 async def run_claude(

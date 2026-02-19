@@ -5,7 +5,6 @@ from typing import List, Dict
 
 from .config import settings
 from .claude_cli import run_claude
-from .review_service import review_cards
 
 logger = logging.getLogger(__name__)
 
@@ -64,13 +63,13 @@ TEMPLATE_INSTRUCTIONS = {
 def _build_system_prompt(template_type: str) -> str:
     template_guide = TEMPLATE_INSTRUCTIONS.get(template_type, TEMPLATE_INSTRUCTIONS["definition"])
 
-    return f"""당신은 시험 대비 암기카드를 만드는 전문가입니다.
-주어진 PDF 텍스트를 분석하여 시험에 나올 핵심 내용으로 암기카드를 생성합니다.
+    return f"""당신은 시험 대비 암기카드를 만드는 전문가이자, 해당 분야의 대학 교수입니다.
+주어진 PDF 텍스트를 분석하여 시험에 나올 핵심 내용으로 암기카드를 생성하고, 교수 관점에서 자체 검수까지 수행합니다.
 
 ## 카드 유형
 {template_guide}
 
-## 규칙 (반드시 준수)
+## 생성 규칙 (반드시 준수)
 
 1. **근거 필수**: 모든 카드에 원문에서 발췌한 근거(evidence)를 포함하세요.
    - 근거가 불확실하면 해당 카드를 만들지 마세요.
@@ -86,6 +85,21 @@ def _build_system_prompt(template_type: str) -> str:
    단, 전체 최대 80장을 넘기지 마세요.
 
 6. **난이도 태그**: easy(기본 개념), medium(응용), hard(심화/비교)로 분류하세요.
+
+## 자체 검수 (필수 — 교수 관점)
+
+카드를 생성한 후, 출력 전에 아래 기준으로 모든 카드를 검수하세요:
+
+1. 카드 내용(질문+답)이 원문 근거와 **사실적으로 일치**하는가?
+2. 답이 **학술적으로 정확**한가? (오개념, 누락, 왜곡 없는가?)
+3. 근거(evidence)가 **실제 원문에 존재**하는 문장인가?
+4. 질문이 **명확하고 모호하지 않은가**? 정답이 하나로 특정되는가?
+5. 원문에 없는 내용을 **지어낸 것은 아닌가**?
+
+검수 결과:
+- 부정확하거나 모호한 카드 → **수정하여 포함**
+- 근거 없거나 지어낸 카드 → **제외** (출력하지 마세요)
+- **최종 통과된 카드만** 출력하세요.
 
 ## 출력 형식
 
@@ -179,13 +193,5 @@ async def generate_cards(pages: List[Dict], template_type: str = "definition") -
     if not result:
         raise ValueError("생성된 카드가 없습니다. PDF 내용을 확인해주세요.")
 
-    # 3단계 페르소나 검수 (교수 → 출제위원 → 수험생)
-    source_text = _build_user_prompt(pages)
-    logger.info("카드 검수 시작: %d장", len(result))
-    result = await review_cards(result, source_text, template_type)
-
-    if not result:
-        raise ValueError("검수 후 유효한 카드가 없습니다. PDF 내용을 확인해주세요.")
-
-    logger.info("최종 카드: %d장 (검수 완료)", len(result))
+    logger.info("최종 카드: %d장 (생성+자체검수 완료)", len(result))
     return result
