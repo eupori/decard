@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:dio/dio.dart' as dio;
 import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
 import '../models/session_model.dart';
@@ -75,6 +76,61 @@ class ApiService {
     }
 
     return SessionModel.fromJson(jsonDecode(response.body));
+  }
+
+  /// PDF 업로드 + 카드 생성 (업로드 진행률 콜백 지원)
+  static Future<SessionModel> generateWithProgress({
+    Uint8List? bytes,
+    String? filePath,
+    required String fileName,
+    required String templateType,
+    required void Function(double progress) onProgress,
+  }) async {
+    final headers = await _headers();
+
+    final formData = dio.FormData.fromMap({
+      'template_type': templateType,
+      'file': filePath != null
+          ? await dio.MultipartFile.fromFile(filePath, filename: fileName)
+          : dio.MultipartFile.fromBytes(bytes!, filename: fileName),
+    });
+
+    final client = dio.Dio(dio.BaseOptions(
+      connectTimeout: const Duration(seconds: 30),
+      sendTimeout: const Duration(seconds: 600),
+      receiveTimeout: const Duration(seconds: 600),
+    ));
+
+    try {
+      final response = await client.post(
+        ApiConfig.generateUrl,
+        data: formData,
+        options: dio.Options(headers: headers),
+        onSendProgress: (sent, total) {
+          if (total > 0) onProgress(sent / total);
+        },
+      );
+
+      if (response.statusCode != 200) {
+        final detail = response.data is Map
+            ? response.data['detail'] as String?
+            : null;
+        throw ApiException(detail ?? '카드 생성에 실패했습니다.', response.statusCode!);
+      }
+
+      return SessionModel.fromJson(response.data as Map<String, dynamic>);
+    } on dio.DioException catch (e) {
+      if (e.response != null) {
+        final data = e.response?.data;
+        final detail =
+            data is Map ? data['detail'] as String? : null;
+        throw ApiException(
+            detail ?? '카드 생성에 실패했습니다.', e.response?.statusCode ?? 500);
+      }
+      throw ApiException('서버에 연결할 수 없습니다.', 0);
+    } finally {
+      client.close();
+    }
   }
 
   /// 세션 조회

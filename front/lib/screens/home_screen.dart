@@ -37,6 +37,7 @@ class _HomeScreenState extends State<HomeScreen> {
     hideBottomNav.value = v;
   }
   bool _uploadDone = false;
+  double _uploadProgress = 0.0;
   bool _waitingHere = false;
   String? _generatedSessionId;
   int _generatedPageCount = 0;
@@ -158,7 +159,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) showSuccessSnackBar(context, '로그아웃되었습니다.');
   }
 
-  int get _estimatedSeconds => (_generatedPageCount * 20).clamp(60, 600);
+  int get _estimatedSeconds => (_generatedPageCount * 35).clamp(90, 900);
 
   String get _estimatedTimeLabel {
     final minutes = (_estimatedSeconds / 60).ceil();
@@ -180,13 +181,21 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     });
 
-    // 프로그레스 바 (1초마다 업데이트, 최대 90%까지)
+    // 프로그레스 바 (1초마다 업데이트, 점근적으로 99%까지)
     _progressTimer?.cancel();
     _progressTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _waitingHere) {
         _elapsedSeconds++;
         setState(() {
-          _progress = (_elapsedSeconds / _estimatedSeconds).clamp(0.0, 0.9);
+          // 예상 시간까지 선형으로 80%까지, 이후 점근적으로 99%까지
+          final linear = (_elapsedSeconds / _estimatedSeconds).clamp(0.0, 0.8);
+          if (linear < 0.8) {
+            _progress = linear;
+          } else {
+            // 80% 이후: 느리게 99%까지 접근 (절대 멈추지 않음)
+            final overtime = _elapsedSeconds - (_estimatedSeconds * 0.8).toInt();
+            _progress = 0.8 + 0.19 * (1 - 1 / (1 + overtime / 60.0));
+          }
         });
       }
     });
@@ -409,23 +418,19 @@ class _HomeScreenState extends State<HomeScreen> {
       _error = null;
       _showGenerating = true;
       _uploadDone = false;
+      _uploadProgress = 0.0;
     });
 
     try {
-      late final dynamic result;
-      if (kIsWeb && _selectedFileBytes != null) {
-        result = await ApiService.generateFromBytes(
-          bytes: _selectedFileBytes!,
-          fileName: _selectedFileName!,
-          templateType: _templateType,
-        );
-      } else {
-        result = await ApiService.generate(
-          filePath: _selectedFilePath!,
-          fileName: _selectedFileName!,
-          templateType: _templateType,
-        );
-      }
+      final result = await ApiService.generateWithProgress(
+        bytes: (kIsWeb && _selectedFileBytes != null) ? _selectedFileBytes : null,
+        filePath: (!kIsWeb && _selectedFilePath != null) ? _selectedFilePath : null,
+        fileName: _selectedFileName!,
+        templateType: _templateType,
+        onProgress: (progress) {
+          if (mounted) setState(() => _uploadProgress = progress);
+        },
+      );
 
       if (!mounted) return;
 
@@ -568,9 +573,25 @@ class _HomeScreenState extends State<HomeScreen> {
                       key: const ValueKey('loading'),
                       width: 64,
                       height: 64,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 3,
-                        color: cs.primary,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          CircularProgressIndicator(
+                            value: _uploadProgress > 0 ? _uploadProgress : null,
+                            strokeWidth: 3,
+                            color: cs.primary,
+                            backgroundColor: cs.outlineVariant.withValues(alpha: 0.3),
+                          ),
+                          if (_uploadProgress > 0)
+                            Text(
+                              '${(_uploadProgress * 100).toInt()}%',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color: cs.primary,
+                              ),
+                            ),
+                        ],
                       ),
                     ),
             ),
@@ -585,7 +606,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Text(
               _uploadDone
                   ? '백그라운드에서 카드를 만들고 있어요.\n어떻게 하시겠어요?'
-                  : 'PDF를 분석하고 있어요...',
+                  : 'PDF를 서버로 전송하고 있어요...',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: cs.onSurfaceVariant,
