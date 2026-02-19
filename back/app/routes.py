@@ -506,6 +506,8 @@ async def _generate_in_background(
     try:
         # 텍스트 추출 (백그라운드에서 실행)
         pages = extract_text_from_pdf(pdf_content)
+        if not pages:
+            raise ValueError("텍스트를 추출할 수 없는 PDF입니다.")
         if len(pages) > settings.MAX_PAGES:
             raise ValueError(f"페이지 수 초과: {len(pages)}/{settings.MAX_PAGES}")
 
