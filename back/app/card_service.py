@@ -140,17 +140,27 @@ def _parse_cards_json(text: str) -> List[Dict]:
     return json.loads(content[start:end + 1])
 
 
+MAX_RETRIES = 2  # 최초 1회 + 재시도 1회
+
+
 async def _generate_chunk(pages: List[Dict], template_type: str) -> List[Dict]:
-    """페이지 청크 하나에 대해 카드를 생성합니다."""
+    """페이지 청크 하나에 대해 카드를 생성합니다. JSON 파싱 실패 시 1회 재시도."""
     system_prompt = _build_system_prompt(template_type)
     user_prompt = _build_user_prompt(pages)
 
-    raw_text = await run_claude(system_prompt, user_prompt, model=settings.LLM_MODEL)
-    try:
-        cards_raw = _parse_cards_json(raw_text)
-    except (ValueError, json.JSONDecodeError) as e:
-        logger.error("카드 JSON 파싱 실패: %s | 응답 앞 500자: %s", e, raw_text[:500])
-        raise
+    last_error = None
+    for attempt in range(MAX_RETRIES):
+        raw_text = await run_claude(system_prompt, user_prompt, model=settings.LLM_MODEL)
+        try:
+            cards_raw = _parse_cards_json(raw_text)
+            break
+        except (ValueError, json.JSONDecodeError) as e:
+            last_error = e
+            if attempt < MAX_RETRIES - 1:
+                logger.warning("카드 JSON 파싱 실패 (재시도 %d/%d): %s", attempt + 1, MAX_RETRIES, e)
+            else:
+                logger.error("카드 JSON 파싱 실패 (최종): %s | 응답 앞 500자: %s", e, raw_text[:500])
+                raise
 
     validated = []
     for card in cards_raw:

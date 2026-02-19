@@ -16,9 +16,10 @@ async def run_claude(
     model: str | None = None,
     tools: str = "",
 ) -> str:
-    """Claude Code CLI `-p` 모드로 AI 호출."""
+    """Claude Code CLI `-p` 모드로 AI 호출. JSON 출력 강제."""
+    import json
 
-    cmd = ["claude", "-p", "--output-format", "text"]
+    cmd = ["claude", "-p", "--output-format", "json"]
 
     if system_prompt:
         cmd += ["--system-prompt", system_prompt]
@@ -36,7 +37,14 @@ async def run_claude(
     logger.debug("CLI 실행 대기: %s", " ".join(cmd))
 
     async with _cli_semaphore:
-        return await _run_cli(cmd, env, user_prompt)
+        raw = await _run_cli(cmd, env, user_prompt)
+
+    # --output-format json → {"type":"result","result":"..."}
+    try:
+        parsed = json.loads(raw)
+        return parsed.get("result", raw)
+    except (json.JSONDecodeError, AttributeError):
+        return raw
 
 
 async def _run_cli(cmd: list, env: dict, user_prompt: str) -> str:
