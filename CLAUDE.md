@@ -6,7 +6,7 @@
 핵심: PDF 업로드 → AI 카드 생성(근거+페이지) → 검수(채택/삭제/수정) → 학습(플래시카드)
 
 **타겟:** 대학생, 고등학생, 자격증 준비생
-**현재 상태:** Phase 3 (보관함 완료) — 보관함 + UX 개선, 프로덕션 배포 대기
+**현재 상태:** Phase 3.5 (성능 최적화 완료) — 프로덕션 배포 완료
 
 **프로덕션 URL:**
 - 웹: https://decard.eupori.dev
@@ -71,7 +71,9 @@ decard/
 │   │   ├── routes.py         # API 엔드포인트 (듀얼 인증)
 │   │   ├── auth.py           # JWT + 카카오 OAuth + get_owner_filter
 │   │   ├── auth_routes.py    # /auth/kakao/login, /callback, /me, /link-device
-│   │   ├── card_service.py   # Claude 카드 생성 (청크 병렬)
+│   │   ├── card_service.py   # Claude 카드 생성 (청크 병렬 + 자체검수 통합 + 재시도)
+│   │   ├── claude_cli.py     # Claude CLI 래퍼 (JSON 출력, Semaphore=3)
+│   │   ├── review_service.py # 검수 서비스 (레거시, 현재 미사용)
 │   │   ├── grade_service.py  # AI 채점
 │   │   └── pdf_service.py    # pdfplumber 텍스트 추출
 │   ├── .env                  # 로컬 환경변수
@@ -88,7 +90,7 @@ decard/
 │       │   ├── folder_model.dart  # 폴더(과목) 데이터 모델
 │       │   └── session_model.dart # 세션 데이터 모델
 │       ├── services/
-│       │   ├── api_service.dart   # HTTP 클라이언트 (JWT Bearer + device_id)
+│       │   ├── api_service.dart   # HTTP 클라이언트 (JWT Bearer + device_id + dio 업로드)
 │       │   ├── auth_service.dart  # JWT 토큰 저장, 유저 캐싱, 로그인/로그아웃
 │       │   ├── device_service.dart # 디바이스 ID 관리
 │       │   └── library_prefs.dart # 보관함 자동저장 설정 (SharedPreferences)
@@ -173,7 +175,7 @@ decard/
 ### 카카오 개발자 콘솔 설정
 - 앱 ID: 1388478 (Decard)
 - **REST API 키 > Redirect URI**에 등록 필요 (앱 > 플랫폼 키 > REST API 키 클릭)
-- 로컬: `http://192.168.35.211:8001/api/v1/auth/kakao/callback`
+- 로컬: `http://localhost:8001/api/v1/auth/kakao/callback`
 - 프로덕션: `https://decard-api.eupori.dev/api/v1/auth/kakao/callback`
 
 ---
@@ -183,14 +185,17 @@ decard/
 ### 카드 생성 흐름
 
 ```
-PDF 업로드 → pdfplumber 텍스트 추출 (페이지별)
+PDF 업로드 (dio, 진행률 표시)
   → 세션 생성 (status=processing) → 즉시 반환
   → asyncio.create_task로 백그라운드 실행:
+    → pdfplumber 텍스트 추출 (페이지별)
     → 5페이지씩 청크 분할
-    → asyncio.gather로 병렬 Claude API 호출
-    → JSON 파싱 + 필수 필드 검증
+    → asyncio.gather로 병렬 Claude CLI 호출 (Semaphore=3)
+      → 각 청크: 카드 생성 + 교수 관점 자체검수 (1회 호출로 통합)
+      → --output-format json 강제, JSON 파싱 실패 시 1회 재시도
     → DB 저장 (Cards) + status=completed (실패 시 status=failed)
   → 프론트: 포그라운드 대기 (5초 폴링) 또는 홈 복귀 (10초 폴링)
+  → 프로그레스: 80%까지 선형, 이후 99%까지 점근적 증가 (멈춤 방지)
 ```
 
 ### 테마 시스템
@@ -224,7 +229,7 @@ PDF 업로드 → pdfplumber 텍스트 추출 (페이지별)
 
 ```bash
 APP_ENV=dev
-CORS_ORIGINS=http://localhost:3000,http://localhost:8080,http://192.168.35.211:8080
+CORS_ORIGINS=http://localhost:3000,http://localhost:8080
 LLM_MODEL=claude-sonnet-4-5-20250929
 DATABASE_URL=sqlite:///./decard.db
 MAX_PDF_SIZE_MB=10
@@ -233,7 +238,7 @@ MAX_PAGES=100
 # Kakao OAuth
 KAKAO_CLIENT_ID=<REST API 키>
 KAKAO_CLIENT_SECRET=<클라이언트 시크릿>
-KAKAO_REDIRECT_URI=http://192.168.35.211:8001/api/v1/auth/kakao/callback
+KAKAO_REDIRECT_URI=http://localhost:8001/api/v1/auth/kakao/callback
 
 # JWT
 JWT_SECRET_KEY=dev-secret-change-me
@@ -248,7 +253,7 @@ FRONTEND_URL=http://localhost:8080
 ```dart
 static const String baseUrl = String.fromEnvironment(
   'API_BASE_URL',
-  defaultValue: 'http://192.168.35.211:8001',
+  defaultValue: 'http://localhost:8001',  // 로컬: IP 대신 localhost (와이파이 변경 무관)
 );
 // 프로덕션 빌드: flutter build web --dart-define=API_BASE_URL=https://decard-api.eupori.dev
 ```
@@ -302,7 +307,7 @@ static const String baseUrl = String.fromEnvironment(
 - 세션 목록에 processing/failed 상태 UI (스피너/에러 아이콘)
 - UTC 시간 버그 수정 (isoformat + "Z" 접미사)
 
-### Phase 3: 보관함 + UX 개선 (현재)
+### Phase 3: 보관함 + UX 개선
 - **보관함 기능**: 폴더(과목)별 세션 관리 — CRUD + 6색 프리셋
 - **바텀 네비게이션**: 홈/보관함 2탭 (IndexedStack 상태 유지)
 - **보관함 저장 모달**: ChoiceChip 폴더 선택 + 새 과목 생성 + 자동 저장 옵션
@@ -313,16 +318,28 @@ static const String baseUrl = String.fromEnvironment(
 - **테마 캐싱**: 다크/라이트 설정 SharedPreferences 저장·복원
 - **이용 가이드**: 좌상단 ? 버튼 → 6단계 가이드 바텀시트
 
+### Phase 3.5: 성능 최적화 + 안정성 (현재)
+- **검수 통합**: 별도 review_service 호출 제거, 생성 프롬프트에 교수 관점 자체검수 통합 (CLI 호출 4→3회)
+- **Semaphore 3**: 청크 3개 동시 실행 가능 (기존 2)
+- **JSON 강제 출력**: Claude CLI `--output-format json` 적용
+- **재시도 로직**: JSON 파싱 실패 시 1회 자동 재시도 (MAX_RETRIES=2)
+- **프로그레스 개선**: 90% 고정 → 99%까지 점근적 증가 (멈춤 현상 제거)
+- **예상 시간 현실화**: pageCount×20 → pageCount×35 (clamp 90~900초)
+- **업로드 진행률**: dio 패키지로 PDF 업로드 진행률 실시간 표시
+- **localhost 기본값**: API URL을 localhost로 변경 (와이파이 IP 변경 시 수정 불필요)
+- **SSH keepalive**: eupori-server에 ServerAliveInterval=30 설정 (SCP 끊김 방지)
+- **동시 요청 테스트**: 5명 동시 → 5/5 성공 (재시도 2회 발동, 모두 복구)
+
 ---
 
 ## 다음 작업 후보 (Phase 4~)
 
 | 우선순위 | 작업 | 설명 |
 |----------|------|------|
-| 1 | 프로덕션 배포 | Phase 3 변경사항 프로덕션 반영 |
-| 2 | 콘시어지 테스트 배포 | 테스터에게 링크 공유 + 피드백 폼 |
-| 3 | APK 업데이트 | 보관함 반영된 Android APK 빌드 |
-| 4 | Google Play Store 등록 | 앱 이름, 설명, 스크린샷 |
-| 5 | SRS 반복학습 | 간격 반복 알고리즘 (SM-2 등) |
-| 6 | 이메일 회원가입 | 카카오 없는 유저 대응 |
-| 7 | Google/Apple 로그인 | 실제 구현 (현재 목업) |
+| 1 | 콘시어지 테스트 배포 | 테스터에게 링크 공유 + 피드백 폼 |
+| 2 | APK 업데이트 | 보관함 반영된 Android APK 빌드 |
+| 3 | Google Play Store 등록 | 앱 이름, 설명, 스크린샷 |
+| 4 | SRS 반복학습 | 간격 반복 알고리즘 (SM-2 등) |
+| 5 | 이메일 회원가입 | 카카오 없는 유저 대응 |
+| 6 | Google/Apple 로그인 | 실제 구현 (현재 목업) |
+| 7 | 큐 시스템 | 동시 사용자 20명+ 대응 (대기 순번 UI) |
