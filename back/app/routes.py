@@ -46,21 +46,16 @@ async def generate(
 
     content = await file.read()
 
-    # PDF 검증
+    # PDF 검증 (첫 페이지만 빠르게)
     valid, error = validate_pdf(content, settings.MAX_PDF_SIZE_MB)
     if not valid:
         raise HTTPException(400, error)
 
-    # 텍스트 추출
-    pages = extract_text_from_pdf(content)
-    if len(pages) > settings.MAX_PAGES:
-        raise HTTPException(400, f"페이지 수가 {settings.MAX_PAGES}페이지를 초과합니다.")
-
-    # 세션 생성
+    # 세션 생성 (즉시 반환 — 텍스트 추출은 백그라운드에서)
     owner = get_owner_id(request)
     session = SessionModel(
         filename=file.filename or "unknown.pdf",
-        page_count=len(pages),
+        page_count=0,
         template_type=template_type,
         device_id=device_id,
         user_id=owner["user_id"],
@@ -70,9 +65,9 @@ async def generate(
     db.commit()
     db.refresh(session)
 
-    # 백그라운드에서 카드 생성 (즉시 반환)
+    # 백그라운드에서 텍스트 추출 + 카드 생성
     asyncio.create_task(
-        _generate_in_background(session.id, pages, template_type)
+        _generate_in_background(session.id, content, template_type)
     )
 
     return _build_session_response(session)
@@ -503,17 +498,26 @@ def remove_from_library(
 
 async def _generate_in_background(
     session_id: str,
-    pages: list[dict],
+    pdf_content: bytes,
     template_type: str,
 ) -> None:
-    """Request 스코프 밖에서 별도 DB 세션으로 카드 생성."""
+    """Request 스코프 밖에서 별도 DB 세션으로 텍스트 추출 + 카드 생성."""
     db = SessionLocal()
     try:
-        cards_data = await generate_cards(pages, template_type)
+        # 텍스트 추출 (백그라운드에서 실행)
+        pages = extract_text_from_pdf(pdf_content)
+        if len(pages) > settings.MAX_PAGES:
+            raise ValueError(f"페이지 수 초과: {len(pages)}/{settings.MAX_PAGES}")
+
         session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
         if not session:
             logger.error("백그라운드 생성: 세션 없음 session=%s", session_id)
             return
+
+        session.page_count = len(pages)
+        db.commit()
+
+        cards_data = await generate_cards(pages, template_type)
 
         for card_data in cards_data:
             db.add(CardModel(session_id=session.id, **card_data))
