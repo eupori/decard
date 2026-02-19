@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     JWT_SECRET_KEY: str = "change-me-in-production"
     JWT_EXPIRE_HOURS: int = 168  # 7 days
 
+    # Slack
+    SLACK_WEBHOOK_URL: str = ""
+
     # Frontend
     FRONTEND_URL: str = "http://localhost:8080"
 

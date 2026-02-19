@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from fastapi import FastAPI
@@ -7,6 +8,7 @@ from .config import settings
 from .database import create_tables
 from .routes import router
 from .auth_routes import router as auth_router
+from .slack import send_slack_alert
 
 logging.basicConfig(level=logging.INFO)
 
@@ -31,6 +33,9 @@ app.include_router(auth_router)
 @app.on_event("startup")
 def startup():
     create_tables()
+    asyncio.get_event_loop().create_task(
+        send_slack_alert("서버 시작", "decard-api 서버가 시작되었습니다.", "info")
+    )
 
 
 @app.get("/health")

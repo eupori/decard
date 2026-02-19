@@ -521,12 +521,17 @@ async def _generate_in_background(
         session.status = "completed"
         db.commit()
         logger.info("백그라운드 생성 완료: session=%s, cards=%d", session_id, len(cards_data))
-    except Exception:
+    except Exception as e:
         logger.exception("백그라운드 카드 생성 실패: session=%s", session_id)
         session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
         if session:
             session.status = "failed"
             db.commit()
+        from .slack import send_slack_alert
+        await send_slack_alert(
+            "카드 생성 실패",
+            f"session: `{session_id}`\nerror: {type(e).__name__}: {e}",
+        )
     finally:
         db.close()
 
