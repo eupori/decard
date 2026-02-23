@@ -105,7 +105,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
   }
 
   void _startStudy() {
-    final studyCards = _cards.where((c) => !c.isRejected).toList();
+    final studyCards = _cards.where((c) => c.isAccepted).toList();
     if (studyCards.isEmpty) {
       showErrorSnackBar(context, '학습할 카드가 없습니다.');
       return;
@@ -159,44 +159,55 @@ class _ReviewScreenState extends State<ReviewScreen> {
       bottomNavigationBar: buildAppBottomNav(context, selectedIndex: 0),
       body: Column(
         children: [
-          // 통계 바
+          // 통계 바 (고정)
           _buildStatsBar(cs),
 
-          // 필터 칩
-          _buildFilterChips(cs),
-
-          // 액션 바
-          _buildActionBar(cs),
-
-          // 카드 리스트
+          // 필터칩 + 액션바 + 카드리스트 통합 스크롤
           Expanded(
             child: filtered.isEmpty
-                ? _buildEmpty(cs)
+                ? ListView(
+                    children: [
+                      _buildFilterChips(cs),
+                      _buildActionBar(cs),
+                      const SizedBox(height: 80),
+                      _buildEmpty(cs),
+                    ],
+                  )
                 : ListView.builder(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 8),
-                    itemCount: filtered.length,
+                    padding: const EdgeInsets.only(bottom: 8),
+                    itemCount: filtered.length + 1,
                     itemBuilder: (context, index) {
-                      final card = filtered[index];
-                      return FlashCardItem(
-                        card: card,
-                        onAccept: () => _updateCardStatus(card, 'accepted'),
-                        onReject: () => _updateCardStatus(card, 'rejected'),
-                        onRestore: () => _updateCardStatus(card, 'pending'),
-                        onEdit: (front, back) async {
-                          try {
-                            await ApiService.updateCard(card.id,
-                                front: front, back: back);
-                            setState(() {
-                              card.front = front;
-                              card.back = back;
-                            });
-                          } catch (e) {
-                            if (mounted) {
-                              showErrorSnackBar(context, '수정 실패: ${friendlyError(e)}');
+                      if (index == 0) {
+                        return Column(
+                          children: [
+                            _buildFilterChips(cs),
+                            _buildActionBar(cs),
+                          ],
+                        );
+                      }
+                      final card = filtered[index - 1];
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: FlashCardItem(
+                          card: card,
+                          onAccept: () => _updateCardStatus(card, 'accepted'),
+                          onReject: () => _updateCardStatus(card, 'rejected'),
+                          onRestore: () => _updateCardStatus(card, 'pending'),
+                          onEdit: (front, back) async {
+                            try {
+                              await ApiService.updateCard(card.id,
+                                  front: front, back: back);
+                              setState(() {
+                                card.front = front;
+                                card.back = back;
+                              });
+                            } catch (e) {
+                              if (mounted) {
+                                showErrorSnackBar(context, '수정 실패: ${friendlyError(e)}');
+                              }
                             }
-                          }
-                        },
+                          },
+                        ),
                       );
                     },
                   ),
@@ -318,7 +329,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
                 child: FilledButton.icon(
                   onPressed: _startStudy,
                   icon: const Icon(Icons.school_rounded, size: 18),
-                  label: const Text('학습하기'),
+                  label: Text('학습하기 ($_acceptedCount장)'),
                 ),
               ),
             ],

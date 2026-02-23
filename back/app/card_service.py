@@ -81,8 +81,11 @@ def _build_system_prompt(template_type: str) -> str:
 
 4. **언어**: 원문 언어와 동일하게 카드를 만드세요 (한국어 원문 → 한국어 카드).
 
-5. **카드 수**: 페이지당 1~3장 정도. 내용이 적으면 더 적게, 많으면 더 많이 만드세요.
-   단, 전체 최대 80장을 넘기지 마세요.
+5. **카드 수**: 20~30장을 목표로 만드세요.
+   시험에 나올 가능성이 높은 핵심 개념 위주로 만들고, 각 카드에 recommend 필드를 추가하세요.
+   - recommend: true → 반드시 암기해야 할 핵심 문제
+   - recommend: false → 보충 학습용 문제
+   recommend: true인 카드가 최소 10장 이상이어야 합니다.
 
 6. **난이도 태그**: easy(기본 개념), medium(응용), hard(심화/비교)로 분류하세요.
 
@@ -111,7 +114,8 @@ def _build_system_prompt(template_type: str) -> str:
     "back": "정답 또는 설명",
     "evidence": "원문에서 발췌한 근거 문장",
     "evidence_page": 페이지번호,
-    "tags": "type:{template_type}, difficulty:easy|medium|hard"
+    "tags": "type:{template_type}, difficulty:easy|medium|hard",
+    "recommend": true
   }}
 ]"""
 
@@ -174,11 +178,14 @@ async def _generate_chunk(pages: List[Dict], template_type: str) -> List[Dict]:
             "evidence_page": int(card["evidence_page"]),
             "tags": str(card.get("tags", f"type:{template_type}")),
             "template_type": template_type,
+            "recommend": bool(card.get("recommend", True)),
         })
 
     return validated
 
 
+MIN_RECOMMEND = 10
+MAX_CARDS = 30
 CHUNK_SIZE = 5  # 5페이지씩 분할
 
 
@@ -199,6 +206,19 @@ async def generate_cards(pages: List[Dict], template_type: str = "definition") -
                 logger.warning("청크 처리 실패: %s", r)
                 continue
             result.extend(r)
+
+    # 30장 초과 시 truncate
+    if len(result) > MAX_CARDS:
+        result = result[:MAX_CARDS]
+
+    # recommend=true 카드 자동 채택 (최소 10장 보장)
+    recommended = [c for c in result if c.get("recommend", False)]
+    if len(recommended) < MIN_RECOMMEND:
+        non_rec = [c for c in result if not c.get("recommend", False)]
+        recommended.extend(non_rec[:MIN_RECOMMEND - len(recommended)])
+    rec_set = set(id(c) for c in recommended)
+    for c in result:
+        c["status"] = "accepted" if id(c) in rec_set else "pending"
 
     if not result:
         raise ValueError("생성된 카드가 없습니다. PDF 내용을 확인해주세요.")

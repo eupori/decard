@@ -522,7 +522,9 @@ async def _generate_in_background(
         cards_data = await generate_cards(pages, template_type)
 
         for card_data in cards_data:
-            db.add(CardModel(session_id=session.id, **card_data))
+            status = card_data.pop("status", "pending")
+            card_data.pop("recommend", None)
+            db.add(CardModel(session_id=session.id, status=status, **card_data))
 
         session.status = "completed"
         db.commit()

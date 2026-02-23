@@ -38,6 +38,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
   bool _uploadDone = false;
   double _uploadProgress = 0.0;
+  bool _serverProcessing = false;
   bool _waitingHere = false;
   String? _generatedSessionId;
   int _generatedPageCount = 0;
@@ -419,6 +420,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _showGenerating = true;
       _uploadDone = false;
       _uploadProgress = 0.0;
+      _serverProcessing = false;
     });
 
     try {
@@ -428,7 +430,12 @@ class _HomeScreenState extends State<HomeScreen> {
         fileName: _selectedFileName!,
         templateType: _templateType,
         onProgress: (progress) {
-          if (mounted) setState(() => _uploadProgress = progress);
+          if (mounted) {
+            setState(() {
+              _uploadProgress = progress;
+              if (progress >= 0.99) _serverProcessing = true;
+            });
+          }
         },
       );
 
@@ -569,35 +576,47 @@ class _HomeScreenState extends State<HomeScreen> {
                       key: const ValueKey('done'),
                       size: 64,
                       color: cs.primary)
-                  : SizedBox(
-                      key: const ValueKey('loading'),
-                      width: 64,
-                      height: 64,
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          CircularProgressIndicator(
-                            value: _uploadProgress > 0 ? _uploadProgress : null,
+                  : _serverProcessing
+                      ? SizedBox(
+                          key: const ValueKey('server'),
+                          width: 64,
+                          height: 64,
+                          child: CircularProgressIndicator(
                             strokeWidth: 3,
                             color: cs.primary,
-                            backgroundColor: cs.outlineVariant.withValues(alpha: 0.3),
                           ),
-                          if (_uploadProgress > 0)
-                            Text(
-                              '${(_uploadProgress * 100).toInt()}%',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
+                        )
+                      : SizedBox(
+                          key: const ValueKey('loading'),
+                          width: 64,
+                          height: 64,
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              CircularProgressIndicator(
+                                value: _uploadProgress > 0 ? _uploadProgress : null,
+                                strokeWidth: 3,
                                 color: cs.primary,
+                                backgroundColor: cs.outlineVariant.withValues(alpha: 0.3),
                               ),
-                            ),
-                        ],
-                      ),
-                    ),
+                              if (_uploadProgress > 0)
+                                Text(
+                                  '${(_uploadProgress * 100).toInt()}%',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: cs.primary,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
             ),
             const SizedBox(height: 32),
             Text(
-              _uploadDone ? '카드 생성이 시작되었어요!' : '업로드 중...',
+              _uploadDone ? '카드 생성이 시작되었어요!'
+                : _serverProcessing ? '서버에서 처리 중...'
+                : '업로드 중...',
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
@@ -605,8 +624,10 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 12),
             Text(
               _uploadDone
-                  ? '백그라운드에서 카드를 만들고 있어요.\n어떻게 하시겠어요?'
-                  : 'PDF를 서버로 전송하고 있어요...',
+                  ? 'AI가 카드를 만들고 있어요.\n어떻게 하시겠어요?'
+                  : _serverProcessing
+                      ? '업로드 완료 \u2713 잠시만 기다려주세요.'
+                      : 'PDF를 서버로 전송하고 있어요...',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: cs.onSurfaceVariant,
@@ -618,7 +639,7 @@ class _HomeScreenState extends State<HomeScreen> {
               FilledButton.icon(
                 onPressed: _startWaitingHere,
                 icon: const Icon(Icons.hourglass_top_rounded),
-                label: const Text('여기서 기다릴게요'),
+                label: Text('완료까지 기다리기 ($_estimatedTimeLabel)'),
                 style: FilledButton.styleFrom(
                   minimumSize: Size.zero,
                   padding: const EdgeInsets.symmetric(

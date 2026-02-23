@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../config/theme.dart';
 import '../models/card_model.dart';
 import '../utils/cloze_text.dart';
@@ -15,7 +16,8 @@ class StudyScreen extends StatefulWidget {
   State<StudyScreen> createState() => _StudyScreenState();
 }
 
-class _StudyScreenState extends State<StudyScreen> {
+class _StudyScreenState extends State<StudyScreen>
+    with TickerProviderStateMixin {
   late List<CardModel> _cards;
   int _currentIndex = 0;
   bool _showBack = false;
@@ -23,31 +25,107 @@ class _StudyScreenState extends State<StudyScreen> {
   bool _isCompleted = false;
   double _dragOffset = 0;
 
+  late AnimationController _slideController;
+  Offset _slideAnimOffset = Offset.zero;
+  double _animRotation = 0;
+  double _animOpacity = 1.0;
+  bool _isAnimating = false;
+
   @override
   void initState() {
     super.initState();
     _cards = List.from(widget.cards)..shuffle(Random());
+    _slideController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+  }
+
+  @override
+  void dispose() {
+    _slideController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _animateSlideOut(int direction) async {
+    if (_isAnimating) return;
+    _isAnimating = true;
+
+    final screenWidth = MediaQuery.of(context).size.width;
+    final endX = direction == 1 ? -screenWidth : screenWidth;
+
+    // 드래그 상태에서 이어받기
+    final startX = _dragOffset * 0.7;
+    final startRotation = _dragOffset * 0.0003;
+    final startOpacity = (1 - (_dragOffset.abs() / 200)).clamp(0.3, 1.0);
+
+    _slideAnimOffset = Offset(startX, 0);
+    _animRotation = startRotation;
+    _animOpacity = startOpacity;
+    _dragOffset = 0;
+
+    // 슬라이드 아웃: 현재 위치 → 화면 밖
+    _slideController.reset();
+    _slideController.duration = const Duration(milliseconds: 250);
+    late VoidCallback slideOutListener;
+    slideOutListener = () {
+      final t = Curves.easeInCubic.transform(_slideController.value);
+      setState(() {
+        _slideAnimOffset = Offset(startX + (endX - startX) * t, 0);
+        _animRotation = startRotation + (endX * 0.0003 - startRotation) * t;
+        _animOpacity = (startOpacity * (1 - t)).clamp(0.0, 1.0);
+      });
+    };
+    _slideController.addListener(slideOutListener);
+    await _slideController.forward();
+    _slideController.removeListener(slideOutListener);
+
+    // 인덱스 변경
+    setState(() {
+      if (direction == 1 && _currentIndex < _cards.length - 1) {
+        _currentIndex++;
+      } else if (direction == -1 && _currentIndex > 0) {
+        _currentIndex--;
+      }
+      _showBack = false;
+      _showEvidence = false;
+      _slideAnimOffset = Offset(-endX * 0.3, 0);
+      _animRotation = 0;
+      _animOpacity = 1.0;
+    });
+
+    HapticFeedback.mediumImpact();
+
+    // 슬라이드 인: 반대쪽에서 → 중앙
+    _slideController.reset();
+    _slideController.duration = const Duration(milliseconds: 200);
+    final slideInStart = -endX * 0.3;
+    late VoidCallback slideInListener;
+    slideInListener = () {
+      final t = Curves.easeOutCubic.transform(_slideController.value);
+      setState(() {
+        _slideAnimOffset = Offset(slideInStart * (1 - t), 0);
+      });
+    };
+    _slideController.addListener(slideInListener);
+    await _slideController.forward();
+    _slideController.removeListener(slideInListener);
+
+    _slideController.duration = const Duration(milliseconds: 300);
+    _isAnimating = false;
+    _slideAnimOffset = Offset.zero;
+    setState(() {});
   }
 
   void _next() {
-    if (_currentIndex < _cards.length - 1) {
-      setState(() {
-        _currentIndex++;
-        _showBack = false;
-        _showEvidence = false;
-        _dragOffset = 0;
-      });
+    if (_currentIndex < _cards.length - 1 && !_isAnimating) {
+      _animateSlideOut(1);
     }
   }
 
   void _prev() {
-    if (_currentIndex > 0) {
-      setState(() {
-        _currentIndex--;
-        _showBack = false;
-        _showEvidence = false;
-        _dragOffset = 0;
-      });
+    if (_currentIndex > 0 && !_isAnimating) {
+      _animateSlideOut(-1);
     }
   }
 
@@ -59,6 +137,29 @@ class _StudyScreenState extends State<StudyScreen> {
       _showEvidence = false;
       _isCompleted = false;
       _dragOffset = 0;
+      _slideAnimOffset = Offset.zero;
+      _animRotation = 0;
+      _animOpacity = 1.0;
+      _isAnimating = false;
+    });
+  }
+
+  void _springBack() {
+    final startOffset = _dragOffset;
+    _slideController.reset();
+    _slideController.duration = const Duration(milliseconds: 200);
+    late VoidCallback listener;
+    listener = () {
+      setState(() {
+        _dragOffset = startOffset *
+            (1 - Curves.easeOutCubic.transform(_slideController.value));
+      });
+    };
+    _slideController.addListener(listener);
+    _slideController.forward().then((_) {
+      _slideController.removeListener(listener);
+      _slideController.duration = const Duration(milliseconds: 300);
+      setState(() => _dragOffset = 0);
     });
   }
 
@@ -130,21 +231,39 @@ class _StudyScreenState extends State<StudyScreen> {
               child: GestureDetector(
                 onTap: () => setState(() => _showBack = !_showBack),
                 onHorizontalDragUpdate: (details) {
+                  if (_isAnimating) return;
                   setState(() => _dragOffset += details.delta.dx);
                 },
                 onHorizontalDragEnd: (details) {
-                  if (_dragOffset < -80) {
-                    _next();
-                  } else if (_dragOffset > 80) {
-                    _prev();
+                  if (_isAnimating) return;
+                  if (_dragOffset < -80 &&
+                      _currentIndex < _cards.length - 1) {
+                    HapticFeedback.lightImpact();
+                    _animateSlideOut(1);
+                  } else if (_dragOffset > 80 && _currentIndex > 0) {
+                    HapticFeedback.lightImpact();
+                    _animateSlideOut(-1);
+                  } else {
+                    _springBack();
                   }
-                  setState(() => _dragOffset = 0);
                 },
                 child: Transform.translate(
-                  offset: Offset(_dragOffset * 0.3, 0),
-                  child: Opacity(
-                    opacity: (1 - (_dragOffset.abs() / 500)).clamp(0.5, 1.0),
-                    child: Container(
+                  offset: Offset(
+                    _isAnimating
+                        ? _slideAnimOffset.dx
+                        : _dragOffset * 0.7,
+                    0,
+                  ),
+                  child: Transform.rotate(
+                    angle: _isAnimating
+                        ? _animRotation
+                        : _dragOffset * 0.0003,
+                    child: Opacity(
+                      opacity: _isAnimating
+                          ? _animOpacity
+                          : (1 - (_dragOffset.abs() / 200))
+                              .clamp(0.3, 1.0),
+                      child: Container(
                       width: double.infinity,
                       margin: const EdgeInsets.symmetric(horizontal: 20),
                       padding: const EdgeInsets.all(24),
@@ -248,6 +367,7 @@ class _StudyScreenState extends State<StudyScreen> {
                         ],
                       ),
                     ),
+                  ),
                   ),
                 ),
               ),
