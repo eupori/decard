@@ -74,5 +74,8 @@ async def _run_cli(cmd: list, env: dict, user_prompt: str) -> str:
         raise RuntimeError(f"Claude CLI 실패 (code {proc.returncode}): {err_msg}")
 
     result = stdout.decode("utf-8").strip()
+    if not result:
+        err_hint = stderr.decode("utf-8", errors="replace").strip()[:200]
+        raise RuntimeError(f"Claude CLI 빈 응답 (stderr: {err_hint or 'none'})")
     logger.debug("CLI 응답 길이: %d chars", len(result))
     return result
