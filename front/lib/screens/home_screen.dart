@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../main.dart' show themeNotifier;
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
@@ -1339,6 +1340,36 @@ class _HomeScreenState extends State<HomeScreen> {
                   '플래시카드로 시험 대비 학습을\n시작하세요!'),
               _guideStep(cs, Icons.folder_rounded, '6. 보관함',
                   '카드를 과목별로 정리하고 관리할 수\n있습니다. (로그인 필요)'),
+              const Divider(height: 32),
+              ListTile(
+                leading: Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: cs.primaryContainer,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.chat_bubble_outline_rounded,
+                      size: 18, color: cs.primary),
+                ),
+                title: const Text('피드백 보내기',
+                    style:
+                        TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                subtitle: Text('버그 제보, 개선 의견을 보내주세요',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: cs.onSurfaceVariant)),
+                trailing: Icon(Icons.open_in_new_rounded,
+                    size: 18, color: cs.onSurfaceVariant),
+                contentPadding: EdgeInsets.zero,
+                onTap: () {
+                  Navigator.pop(context);
+                  launchUrl(
+                      Uri.parse('https://open.kakao.com/o/TODO_PLACEHOLDER'),
+                      mode: LaunchMode.externalApplication);
+                },
+              ),
               const SizedBox(height: 8),
             ],
           ),
