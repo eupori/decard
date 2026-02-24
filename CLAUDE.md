@@ -6,7 +6,7 @@
 핵심: PDF 업로드 → AI 카드 생성(근거+페이지) → 검수(채택/삭제/수정) → 학습(플래시카드)
 
 **타겟:** 대학생, 고등학생, 자격증 준비생
-**현재 상태:** Phase 5 (콘시어지 테스트 배포) — 테스터 배포 준비 완료
+**현재 상태:** Phase 5 (콘시어지 테스트 배포) — 프롬프트 고도화 + UX 개선 완료
 
 **프로덕션 URL:**
 - 웹: https://decard.eupori.dev
@@ -101,7 +101,8 @@ decard/
 │       │   ├── library_screen.dart # 보관함 (폴더 그리드)
 │       │   ├── folder_detail_screen.dart # 폴더 상세 (세션 목록)
 │       │   ├── review_screen.dart # 리뷰 (채택/삭제/수정)
-│       │   └── study_screen.dart  # 학습 (플래시카드)
+│       │   ├── study_screen.dart  # 학습 (플래시카드)
+│       │   └── splash_screen.dart # 애니메이션 스플래시 (카드 딜링)
 │       ├── utils/
 │       │   ├── web_auth.dart      # 웹: URL fragment 토큰 추출
 │       │   ├── web_auth_stub.dart # 비웹 스텁
@@ -189,11 +190,13 @@ PDF 업로드 (dio, 진행률 표시)
   → 세션 생성 (status=processing) → 즉시 반환
   → asyncio.create_task로 백그라운드 실행:
     → pdfplumber 텍스트 추출 (페이지별)
-    → 5페이지씩 청크 분할
-    → asyncio.gather로 병렬 Claude CLI 호출 (Semaphore=5)
-      → 각 청크: 카드 생성 + 교수 관점 자체검수 (1회 호출로 통합)
+    → 5페이지씩 청크 분할 (200자 미만 청크는 이전 청크에 병합)
+    → asyncio.gather로 병렬 Claude CLI 호출 (Semaphore=3)
+      → 4단계 사고 프롬프트: 내용 분석 → 출제 포인트 → 카드 작성 → 채택 판단
+      → 필기/메모도 보충 자료로 적극 분석 (낙서만 무시)
       → --output-format json 강제, 실패 시 3회 재시도 (2/5/10초 백오프)
-      → recommend 필드로 자동 채택 (recommend=true → accepted, 최소 10장)
+      → recommend 가중치 판단 (출제가능성/학습효율/핵심도/독립성)
+      → recommend=true 카드 자동 accepted (60~75% 비율, 최소 10장)
     → DB 저장 (Cards, status=accepted/pending) + session status=completed
   → 프론트: 포그라운드 대기 (5초 폴링) 또는 홈 복귀 (10초 폴링)
   → 프로그레스: 80%까지 선형, 이후 99%까지 점근적 증가 (멈춤 방지)
@@ -343,12 +346,21 @@ static const String baseUrl = String.fromEnvironment(
 
 ### Phase 5: 콘시어지 테스트 배포 (현재)
 - **피드백 버튼**: 이용가이드 바텀시트에 카카오 오픈채팅 피드백 버튼 추가 (URL placeholder)
-- **APK 빌드 + GitHub Releases**: v0.1.0-beta 릴리스 (APK 52.3MB)
+- **APK 빌드 + GitHub Releases**: v0.1.0-beta 릴리스 (APK 52.5MB)
 - **README 업데이트**: 프로젝트 소개 + 다운로드 링크 (releases/latest)
-- **Semaphore 3→5**: CLI 동시 실행 수 증가 (동시 ~10명 대응)
-- **메모리 모니터링**: 가용 메모리 150MB 이하 시 Slack 경고 자동 발송
+- **메모리 모니터링**: psutil — 가용 메모리 150MB 이하 시 Slack 경고 자동 발송
 - **/health 개선**: 메모리 상태 (total/available/percent) + cli_semaphore 표시
-- **서버**: EC2 t3.small (2GB RAM, 2vCPU) — 동시 10명 대응, 등록 테스터 20명 수용 가능
+- **서버 안정화**: Docker mem_limit 768m→1536m, memswap_limit 2g (OOM 방지)
+- **카카오 모바일 로그인**: flutter_web_auth_2 + 커스텀 스킴(decard://) — 외부 브라우저→앱 복귀 자동화
+- **플래시카드 슬라이드 감도**: 드래그 임계값 80→40px
+- **애니메이션 스플래시**: 네이티브(브랜드색만) → Dart(로고 바운스 + 카드 3장 부채꼴 + 텍스트 슬라이드)
+- **.gitignore 추가**: .env.production, *.db*, STRATEGY.md 보호
+- **프롬프트 고도화**:
+  - 4단계 사고 흐름: 내용 분석 → 출제 포인트 선정 → 카드 작성 → 채택 판단
+  - 필기/메모를 강의 보충 자료로 적극 분석 (기존: "파편화된 텍스트" 거부)
+  - 가중치 기반 채택: 출제가능성/학습효율/핵심도/독립성 → 60~75% 채택 (기존: 거의 전부)
+  - MAX_CARDS 30→50, 짧은 청크(200자 미만) 자동 병합
+- **청크별 상세 로깅**: 페이지/텍스트 길이/CLI 응답/파싱 결과/재시도 상황 추적
 
 ---
 
@@ -356,8 +368,8 @@ static const String baseUrl = String.fromEnvironment(
 
 | 우선순위 | 작업 | 설명 |
 |----------|------|------|
-| 1 | 테스터 모집 + 배포 | 웹 링크 + APK 링크 + 피드백 안내 메시지 |
-| 2 | 오픈채팅방 URL 교체 | 카카오 오픈채팅 생성 후 TODO_PLACEHOLDER 교체 |
+| 1 | 오픈채팅방 URL 교체 | 카카오 오픈채팅 생성 후 TODO_PLACEHOLDER 교체 |
+| 2 | 테스터 모집 + 배포 | 웹 링크 + APK 링크 + 피드백 안내 메시지 |
 | 3 | Google Play Store 등록 | 앱 이름, 설명, 스크린샷, 개인정보처리방침 |
 | 4 | SRS 반복학습 | 간격 반복 알고리즘 (SM-2 등) |
 | 5 | 이메일 회원가입 | 카카오 없는 유저 대응 |
