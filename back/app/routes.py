@@ -36,6 +36,9 @@ async def generate(
     db: Session = Depends(get_db),
     device_id: str = Depends(get_device_id),
 ):
+    import time
+    t0 = time.time()
+
     # "subjective" — TODO: MVP 이후 추가
     if template_type not in ("definition", "cloze", "comparison"):
         raise HTTPException(400, "지원하지 않는 템플릿입니다. (definition / cloze / comparison)")
@@ -44,12 +47,16 @@ async def generate(
     if file.size and file.size > settings.MAX_PDF_SIZE_MB * 1024 * 1024:
         raise HTTPException(400, f"파일 크기가 {settings.MAX_PDF_SIZE_MB}MB를 초과합니다.")
 
+    t1 = time.time()
     content = await file.read()
+    t2 = time.time()
 
     # PDF 검증 (첫 페이지만 빠르게)
     valid, error = validate_pdf(content, settings.MAX_PDF_SIZE_MB)
     if not valid:
         raise HTTPException(400, error)
+
+    t3 = time.time()
 
     # 세션 생성 (즉시 반환 — 텍스트 추출은 백그라운드에서)
     owner = get_owner_id(request)
@@ -65,9 +72,16 @@ async def generate(
     db.commit()
     db.refresh(session)
 
+    t4 = time.time()
+
     # 백그라운드에서 텍스트 추출 + 카드 생성
     asyncio.create_task(
         _generate_in_background(session.id, content, template_type)
+    )
+
+    logger.info(
+        "POST /generate 타이밍: file.read=%.2fs, validate=%.2fs, db=%.2fs, total=%.2fs, size=%.1fMB",
+        t2 - t1, t3 - t2, t4 - t3, t4 - t0, len(content) / 1024 / 1024,
     )
 
     return _build_session_response(session)
