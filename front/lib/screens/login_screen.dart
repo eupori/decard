@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import '../services/auth_service.dart';
 import '../utils/snackbar_helper.dart';
 import '../utils/web_auth_stub.dart'
@@ -137,11 +137,34 @@ class LoginScreen extends StatelessWidget {
   }
 
   Future<void> _handleKakaoLogin(BuildContext context) async {
-    final url = AuthService.getKakaoLoginUrl();
     if (kIsWeb) {
+      final url = AuthService.getKakaoLoginUrl();
       web_nav.navigateTo(url);
     } else {
-      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      try {
+        final url = '${AuthService.getKakaoLoginUrl()}?platform=mobile';
+        final result = await FlutterWebAuth2.authenticate(
+          url: url,
+          callbackUrlScheme: 'decard',
+        );
+        final uri = Uri.parse(result);
+        final token = uri.queryParameters['token'];
+        final error = uri.queryParameters['error'];
+        if (token != null && context.mounted) {
+          await AuthService.setToken(token);
+          await AuthService.linkDevice();
+          if (context.mounted) {
+            showSuccessSnackBar(context, '로그인되었습니다!');
+            Navigator.pop(context, true);
+          }
+        } else if (error != null && context.mounted) {
+          showErrorSnackBar(context, '로그인에 실패했습니다. 다시 시도해주세요.');
+        }
+      } catch (e) {
+        if (context.mounted) {
+          showErrorSnackBar(context, '로그인이 취소되었습니다.');
+        }
+      }
     }
   }
 

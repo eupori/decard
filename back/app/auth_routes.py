@@ -27,13 +27,15 @@ router = APIRouter(prefix="/api/v1/auth")
 # ──────────────────────────────────────
 
 @router.get("/kakao/login")
-def kakao_login():
-    params = urlencode({
+def kakao_login(platform: str = "web"):
+    params = {
         "client_id": settings.KAKAO_CLIENT_ID,
         "redirect_uri": settings.KAKAO_REDIRECT_URI,
         "response_type": "code",
-    })
-    return RedirectResponse(f"https://kauth.kakao.com/oauth/authorize?{params}")
+    }
+    if platform == "mobile":
+        params["state"] = "mobile"
+    return RedirectResponse(f"https://kauth.kakao.com/oauth/authorize?{urlencode(params)}")
 
 
 # ──────────────────────────────────────
@@ -41,7 +43,7 @@ def kakao_login():
 # ──────────────────────────────────────
 
 @router.get("/kakao/callback")
-async def kakao_callback(code: str, db: Session = Depends(get_db)):
+async def kakao_callback(code: str, state: str = "", db: Session = Depends(get_db)):
     try:
         # 1. 코드 → 토큰 교환
         token_data = await exchange_kakao_code(code)
@@ -60,13 +62,18 @@ async def kakao_callback(code: str, db: Session = Depends(get_db)):
         # 4. JWT 발급
         jwt_token = create_access_token(user.id)
 
-        # 5. 프론트엔드로 리다이렉트 (fragment로 토큰 전달)
-        frontend_url = settings.FRONTEND_URL.rstrip("/")
-        redirect_url = f"{frontend_url}/#token={jwt_token}"
+        # 5. 리다이렉트 (모바일: 커스텀 스킴, 웹: fragment)
+        if state == "mobile":
+            redirect_url = f"decard://auth?token={jwt_token}"
+        else:
+            frontend_url = settings.FRONTEND_URL.rstrip("/")
+            redirect_url = f"{frontend_url}/#token={jwt_token}"
         return RedirectResponse(redirect_url)
 
     except Exception as e:
         logger.exception("카카오 로그인 실패")
+        if state == "mobile":
+            return RedirectResponse("decard://auth?error=login_failed")
         frontend_url = settings.FRONTEND_URL.rstrip("/")
         return RedirectResponse(f"{frontend_url}/#auth_error=login_failed")
 

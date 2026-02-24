@@ -20,12 +20,14 @@ dependencies:
   uuid: ^4.5.1
   web: ^1.1.0
   dio: ^5.9.1
+  flutter_web_auth_2: ^4.0.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.3
+  flutter_native_splash: ^2.4.0
 
 flutter_launcher_icons:
   android: true
@@ -36,6 +38,20 @@ flutter_launcher_icons:
   image_path: "assets/icon/app_icon.png"
   adaptive_icon_background: "#C2E7DA"
   adaptive_icon_foreground: "assets/icon/app_icon.png"
+
+flutter_native_splash:
+  color: "#1A1B41"
+  color_dark: "#121212"
+  image: "assets/icon/app_icon.png"
+  image_dark: "assets/icon/app_icon.png"
+  android_12:
+    color: "#1A1B41"
+    color_dark: "#121212"
+    icon_background_color: "#1A1B41"
+    icon_background_color_dark: "#121212"
+    image: "assets/icon/app_icon.png"
+    image_dark: "assets/icon/app_icon.png"
+  web: false
 
 flutter:
   uses-material-design: true

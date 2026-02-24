@@ -236,11 +236,11 @@ class _StudyScreenState extends State<StudyScreen>
                 },
                 onHorizontalDragEnd: (details) {
                   if (_isAnimating) return;
-                  if (_dragOffset < -80 &&
+                  if (_dragOffset < -40 &&
                       _currentIndex < _cards.length - 1) {
                     HapticFeedback.lightImpact();
                     _animateSlideOut(1);
-                  } else if (_dragOffset > 80 && _currentIndex > 0) {
+                  } else if (_dragOffset > 40 && _currentIndex > 0) {
                     HapticFeedback.lightImpact();
                     _animateSlideOut(-1);
                   } else {
