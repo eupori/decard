@@ -6,7 +6,7 @@
 핵심: PDF 업로드 → AI 카드 생성(근거+페이지) → 검수(채택/삭제/수정) → 학습(플래시카드)
 
 **타겟:** 대학생, 고등학생, 자격증 준비생
-**현재 상태:** Phase 4 (자동 채택 + QA 완료) — 프로덕션 배포 완료
+**현재 상태:** Phase 5 (콘시어지 테스트 배포) — 테스터 배포 준비 완료
 
 **프로덕션 URL:**
 - 웹: https://decard.eupori.dev
@@ -72,7 +72,7 @@ decard/
 │   │   ├── auth.py           # JWT + 카카오 OAuth + get_owner_filter
 │   │   ├── auth_routes.py    # /auth/kakao/login, /callback, /me, /link-device
 │   │   ├── card_service.py   # Claude 카드 생성 (청크 병렬 + 자체검수 통합 + 재시도)
-│   │   ├── claude_cli.py     # Claude CLI 래퍼 (JSON 출력, Semaphore=3)
+│   │   ├── claude_cli.py     # Claude CLI 래퍼 (JSON 출력, Semaphore=5, 메모리 모니터링)
 │   │   ├── review_service.py # 검수 서비스 (레거시, 현재 미사용)
 │   │   ├── grade_service.py  # AI 채점
 │   │   └── pdf_service.py    # pdfplumber 텍스트 추출
@@ -142,7 +142,7 @@ decard/
 | GET | `/api/v1/auth/kakao/callback` | 카카오 OAuth 콜백 → JWT 발급 |
 | GET | `/api/v1/auth/me` | 현재 유저 정보 |
 | POST | `/api/v1/auth/link-device` | 디바이스 세션 마이그레이션 |
-| GET | `/health` | 헬스체크 |
+| GET | `/health` | 헬스체크 (메모리 상태 + CLI semaphore 포함) |
 
 ### 템플릿 타입
 - `definition`: 정의형 ("OO란?")
@@ -190,7 +190,7 @@ PDF 업로드 (dio, 진행률 표시)
   → asyncio.create_task로 백그라운드 실행:
     → pdfplumber 텍스트 추출 (페이지별)
     → 5페이지씩 청크 분할
-    → asyncio.gather로 병렬 Claude CLI 호출 (Semaphore=3)
+    → asyncio.gather로 병렬 Claude CLI 호출 (Semaphore=5)
       → 각 청크: 카드 생성 + 교수 관점 자체검수 (1회 호출로 통합)
       → --output-format json 강제, 실패 시 3회 재시도 (2/5/10초 백오프)
       → recommend 필드로 자동 채택 (recommend=true → accepted, 최소 10장)
@@ -331,7 +331,7 @@ static const String baseUrl = String.fromEnvironment(
 - **SSH keepalive**: eupori-server에 ServerAliveInterval=30 설정 (SCP 끊김 방지)
 - **동시 요청 테스트**: 5명 동시 → 5/5 성공 (재시도 2회 발동, 모두 복구)
 
-### Phase 4: AI 자동 채택 + QA 검증 (현재)
+### Phase 4: AI 자동 채택 + QA 검증
 - **AI 자동 채택**: 카드 생성 시 `recommend: true/false` → recommend=true 카드 자동 accepted (최소 10장 보장)
 - **카드 수 안정화**: 프롬프트 "페이지당 3~5장" + MAX_CARDS=30 truncate (기존: "페이지당 1~3장, 최대 80장")
 - **학습 필터**: 채택(accepted) 카드만 학습 대상 (기존: rejected 제외 전부)
@@ -341,16 +341,25 @@ static const String baseUrl = String.fromEnvironment(
   - Group A (10명): Full E2E (업로드→생성→자동채택→수정→학습→CSV→삭제)
   - Group B (10명): 스트레스(3동시), 악성입력(SQL injection/XSS/빈파일), 데이터격리, 엣지케이스, 사이드이펙트
 
+### Phase 5: 콘시어지 테스트 배포 (현재)
+- **피드백 버튼**: 이용가이드 바텀시트에 카카오 오픈채팅 피드백 버튼 추가 (URL placeholder)
+- **APK 빌드 + GitHub Releases**: v0.1.0-beta 릴리스 (APK 52.3MB)
+- **README 업데이트**: 프로젝트 소개 + 다운로드 링크 (releases/latest)
+- **Semaphore 3→5**: CLI 동시 실행 수 증가 (동시 ~10명 대응)
+- **메모리 모니터링**: 가용 메모리 150MB 이하 시 Slack 경고 자동 발송
+- **/health 개선**: 메모리 상태 (total/available/percent) + cli_semaphore 표시
+- **서버**: EC2 t3.small (2GB RAM, 2vCPU) — 동시 10명 대응, 등록 테스터 20명 수용 가능
+
 ---
 
-## 다음 작업 후보 (Phase 5~)
+## 다음 작업 후보 (Phase 6~)
 
 | 우선순위 | 작업 | 설명 |
 |----------|------|------|
-| 1 | 콘시어지 테스트 배포 | 테스터에게 링크 공유 + 피드백 폼 |
-| 2 | APK 업데이트 | 자동 채택 반영된 Android APK 빌드 |
-| 3 | Google Play Store 등록 | 앱 이름, 설명, 스크린샷 |
+| 1 | 테스터 모집 + 배포 | 웹 링크 + APK 링크 + 피드백 안내 메시지 |
+| 2 | 오픈채팅방 URL 교체 | 카카오 오픈채팅 생성 후 TODO_PLACEHOLDER 교체 |
+| 3 | Google Play Store 등록 | 앱 이름, 설명, 스크린샷, 개인정보처리방침 |
 | 4 | SRS 반복학습 | 간격 반복 알고리즘 (SM-2 등) |
 | 5 | 이메일 회원가입 | 카카오 없는 유저 대응 |
 | 6 | Google/Apple 로그인 | 실제 구현 (현재 목업) |
-| 7 | 큐 시스템 | 동시 사용자 20명+ 대응 (대기 순번 UI) |
+| 7 | 서버 스케일업 | t3.small→t3.medium (메모리 경고 빈발 시) |
