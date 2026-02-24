@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'config/theme.dart';
-import 'screens/main_screen.dart';
+import 'screens/splash_screen.dart';
 
 final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.dark);
 
@@ -37,7 +37,7 @@ class DecardApp extends StatelessWidget {
           theme: AppTheme.light,
           darkTheme: AppTheme.darkTheme,
           themeMode: mode,
-          home: const MainScreen(),
+          home: const SplashScreen(),
         );
       },
     );
