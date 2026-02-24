@@ -40,4 +40,11 @@ def startup():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "decard"}
+    from .claude_cli import _check_memory
+    mem = _check_memory()
+    return {
+        "status": "ok",
+        "service": "decard",
+        "memory": mem,
+        "cli_semaphore": 5,
+    }

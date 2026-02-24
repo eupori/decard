@@ -1,13 +1,45 @@
 import asyncio
 import logging
 import os
+import psutil
 
 from .config import settings
 
 logger = logging.getLogger(__name__)
 
 # Claude CLI는 Node.js 프로세스 — 동시 실행 수 제한 (메모리 보호)
-_cli_semaphore = asyncio.Semaphore(3)
+_cli_semaphore = asyncio.Semaphore(5)
+
+MEMORY_WARN_MB = 150  # 가용 메모리가 이 이하면 Slack 경고
+_memory_alert_sent = False  # 중복 알림 방지
+
+
+def _check_memory() -> dict:
+    """시스템 메모리 상태를 반환합니다."""
+    mem = psutil.virtual_memory()
+    return {
+        "total_mb": round(mem.total / 1024 / 1024),
+        "available_mb": round(mem.available / 1024 / 1024),
+        "percent_used": mem.percent,
+    }
+
+
+async def _warn_if_low_memory():
+    """가용 메모리가 임계값 이하면 Slack 경고를 보냅니다."""
+    global _memory_alert_sent
+    mem = _check_memory()
+    if mem["available_mb"] < MEMORY_WARN_MB and not _memory_alert_sent:
+        _memory_alert_sent = True
+        from .slack import send_slack_alert
+        await send_slack_alert(
+            "메모리 부족 경고",
+            f"가용 메모리: {mem['available_mb']}MB / 전체: {mem['total_mb']}MB ({mem['percent_used']}% 사용)\n"
+            f"Semaphore=5, CLI 동시 실행 수를 줄이는 것을 검토하세요.",
+            "warn",
+        )
+        logger.warning("메모리 부족 경고: %s", mem)
+    elif mem["available_mb"] >= MEMORY_WARN_MB * 2:
+        _memory_alert_sent = False  # 메모리 회복 시 알림 리셋
 
 
 async def run_claude(
@@ -37,6 +69,7 @@ async def run_claude(
     logger.debug("CLI 실행 대기: %s", " ".join(cmd))
 
     async with _cli_semaphore:
+        await _warn_if_low_memory()
         raw = await _run_cli(cmd, env, user_prompt)
 
     # --output-format json → {"type":"result","result":"..."}
