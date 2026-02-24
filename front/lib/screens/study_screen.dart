@@ -128,6 +128,46 @@ class _StudyScreenState extends State<StudyScreen>
   }
 
   void _reshuffle() {
+    if (_currentIndex > 0 && !_isCompleted) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('카드 섞기'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('현재 ${_currentIndex + 1}/${_cards.length}장째입니다.\n섞으면 처음부터 다시 시작됩니다.'),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('취소'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _doReshuffle();
+                      },
+                      child: const Text('섞기'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+    } else {
+      _doReshuffle();
+    }
+  }
+
+  void _doReshuffle() {
     setState(() {
       _cards.shuffle(Random());
       _currentIndex = 0;
@@ -184,41 +224,78 @@ class _StudyScreenState extends State<StudyScreen>
     }
   }
 
+  String _formatAnswer(String text) {
+    var result = text;
+    // 온점 뒤 줄바꿈 (문장 끝, 이미 줄바꿈이 아닌 경우)
+    result = result.replaceAllMapped(
+      RegExp(r'([.다])[\s]+(?!\n)'),
+      (m) => '${m[1]}\n',
+    );
+    // "1." "2)" 등 번호 매기기
+    result = result.replaceAllMapped(
+      RegExp(r'(?<!\n)\s+(\d+[.)]\s)'),
+      (m) => '\n${m[1]}',
+    );
+    // "1단계" "2단계" 등 단계 구분
+    result = result.replaceAllMapped(
+      RegExp(r'(?<!\n)\s+(\d+단계)'),
+      (m) => '\n${m[1]}',
+    );
+    // "①②③" 등 원문자
+    result = result.replaceAllMapped(
+      RegExp(r'(?<!\n)\s*([①②③④⑤⑥⑦⑧⑨⑩])'),
+      (m) => '\n${m[1]}',
+    );
+    // "·" "-" 항목 구분
+    result = result.replaceAllMapped(
+      RegExp(r'(?<!\n)\s+([-·•]\s)'),
+      (m) => '\n${m[1]}',
+    );
+    // 연속 줄바꿈 정리
+    result = result.replaceAll(RegExp(r'\n{3,}'), '\n\n');
+    // 단어 기준 줄바꿈 (글자 사이에 Word Joiner 삽입 → 공백에서만 줄바꿈)
+    result = result.split('\n').map((line) {
+      return line.split(' ').map((word) {
+        if (word.isEmpty) return word;
+        return word.split('').join('\u2060');
+      }).join(' ');
+    }).join('\n');
+    return result.trimLeft();
+  }
+
   Widget _buildBackContent(CardModel card, ColorScheme cs) {
-    return Column(
+    final formatted = _formatAnswer(card.back);
+    final isLong = formatted.length > 40 || formatted.contains('\n');
+    return Text(
+      formatted,
       key: const ValueKey('back'),
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          card.back,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                height: 1.7,
-                fontWeight: FontWeight.w500,
-              ),
-          textAlign: TextAlign.center,
-        ),
-        if (card.evidence.isNotEmpty) ...[
-          const SizedBox(height: 16),
-          Divider(color: cs.outlineVariant, height: 1),
-          const SizedBox(height: 12),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: AppTheme.evidenceColor.withValues(alpha: 0.06),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text(
-              'p.${card.evidencePage}: ${card.evidence}',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    height: 1.5,
-                    fontStyle: FontStyle.italic,
-                    color: cs.onSurfaceVariant,
-                  ),
-            ),
+      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+            height: 1.8,
+            fontWeight: FontWeight.w500,
+            wordSpacing: 1.2,
           ),
-        ],
-      ],
+      textAlign: isLong ? TextAlign.left : TextAlign.center,
+      softWrap: true,
+      overflow: TextOverflow.visible,
+    );
+  }
+
+  Widget _buildEvidence(CardModel card, ColorScheme cs) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: AppTheme.evidenceColor.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        'p.${card.evidencePage}: ${card.evidence}',
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              height: 1.5,
+              fontStyle: FontStyle.italic,
+              color: cs.onSurfaceVariant,
+            ),
+      ),
     );
   }
 
@@ -282,7 +359,7 @@ class _StudyScreenState extends State<StudyScreen>
             ),
 
             // 카드
-            Flexible(
+            Expanded(
               child: GestureDetector(
                 onTap: () => setState(() => _showBack = !_showBack),
                 onHorizontalDragUpdate: (details) {
@@ -318,11 +395,6 @@ class _StudyScreenState extends State<StudyScreen>
                           ? _animOpacity
                           : (1 - (_dragOffset.abs() / 200))
                               .clamp(0.3, 1.0),
-                      child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        minHeight: 280,
-                        maxHeight: MediaQuery.of(context).size.height * 0.55,
-                      ),
                       child: Container(
                       width: double.infinity,
                       margin: const EdgeInsets.symmetric(horizontal: 20),
@@ -404,8 +476,10 @@ class _StudyScreenState extends State<StudyScreen>
                             ),
                           ),
 
-                          // 탭 힌트 (처음 2장만)
-                          if (_currentIndex < 2)
+                          // 근거 (뒷면일 때) 또는 힌트 (처음 2장)
+                          if (_showBack && card.evidence.isNotEmpty)
+                            _buildEvidence(card, cs)
+                          else if (_currentIndex < 2)
                             Text(
                               '탭하여 뒤집기 · 스와이프로 넘기기',
                               style: TextStyle(
@@ -413,7 +487,6 @@ class _StudyScreenState extends State<StudyScreen>
                             ),
                         ],
                       ),
-                    ),
                     ),
                   ),
                   ),
