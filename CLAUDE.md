@@ -6,7 +6,7 @@
 핵심: PDF 업로드 → AI 카드 생성(근거+페이지) → 검수(채택/삭제/수정) → 학습(플래시카드)
 
 **타겟:** 대학생, 고등학생, 자격증 준비생
-**현재 상태:** Phase 3.5 (성능 최적화 완료) — 프로덕션 배포 완료
+**현재 상태:** Phase 4 (자동 채택 + QA 완료) — 프로덕션 배포 완료
 
 **프로덕션 URL:**
 - 웹: https://decard.eupori.dev
@@ -192,8 +192,9 @@ PDF 업로드 (dio, 진행률 표시)
     → 5페이지씩 청크 분할
     → asyncio.gather로 병렬 Claude CLI 호출 (Semaphore=3)
       → 각 청크: 카드 생성 + 교수 관점 자체검수 (1회 호출로 통합)
-      → --output-format json 강제, JSON 파싱 실패 시 1회 재시도
-    → DB 저장 (Cards) + status=completed (실패 시 status=failed)
+      → --output-format json 강제, 실패 시 3회 재시도 (2/5/10초 백오프)
+      → recommend 필드로 자동 채택 (recommend=true → accepted, 최소 10장)
+    → DB 저장 (Cards, status=accepted/pending) + session status=completed
   → 프론트: 포그라운드 대기 (5초 폴링) 또는 홈 복귀 (10초 폴링)
   → 프로그레스: 80%까지 선형, 이후 99%까지 점근적 증가 (멈춤 방지)
 ```
@@ -318,7 +319,7 @@ static const String baseUrl = String.fromEnvironment(
 - **테마 캐싱**: 다크/라이트 설정 SharedPreferences 저장·복원
 - **이용 가이드**: 좌상단 ? 버튼 → 6단계 가이드 바텀시트
 
-### Phase 3.5: 성능 최적화 + 안정성 (현재)
+### Phase 3.5: 성능 최적화 + 안정성
 - **검수 통합**: 별도 review_service 호출 제거, 생성 프롬프트에 교수 관점 자체검수 통합 (CLI 호출 4→3회)
 - **Semaphore 3**: 청크 3개 동시 실행 가능 (기존 2)
 - **JSON 강제 출력**: Claude CLI `--output-format json` 적용
@@ -330,14 +331,24 @@ static const String baseUrl = String.fromEnvironment(
 - **SSH keepalive**: eupori-server에 ServerAliveInterval=30 설정 (SCP 끊김 방지)
 - **동시 요청 테스트**: 5명 동시 → 5/5 성공 (재시도 2회 발동, 모두 복구)
 
+### Phase 4: AI 자동 채택 + QA 검증 (현재)
+- **AI 자동 채택**: 카드 생성 시 `recommend: true/false` → recommend=true 카드 자동 accepted (최소 10장 보장)
+- **카드 수 안정화**: 프롬프트 "페이지당 3~5장" + MAX_CARDS=30 truncate (기존: "페이지당 1~3장, 최대 80장")
+- **학습 필터**: 채택(accepted) 카드만 학습 대상 (기존: rejected 제외 전부)
+- **학습 버튼**: "학습하기 (N장)" — 채택 카드 수 표시
+- **재시도 보강**: MAX_RETRIES 2→3, 지수 백오프 (2/5/10초), 빈 응답·CLI 오류도 재시도
+- **프로덕션 QA**: 20명 시뮬레이션 자동 테스트 — 97.1% → 재시도 보강 후 100% 통과
+  - Group A (10명): Full E2E (업로드→생성→자동채택→수정→학습→CSV→삭제)
+  - Group B (10명): 스트레스(3동시), 악성입력(SQL injection/XSS/빈파일), 데이터격리, 엣지케이스, 사이드이펙트
+
 ---
 
-## 다음 작업 후보 (Phase 4~)
+## 다음 작업 후보 (Phase 5~)
 
 | 우선순위 | 작업 | 설명 |
 |----------|------|------|
 | 1 | 콘시어지 테스트 배포 | 테스터에게 링크 공유 + 피드백 폼 |
-| 2 | APK 업데이트 | 보관함 반영된 Android APK 빌드 |
+| 2 | APK 업데이트 | 자동 채택 반영된 Android APK 빌드 |
 | 3 | Google Play Store 등록 | 앱 이름, 설명, 스크린샷 |
 | 4 | SRS 반복학습 | 간격 반복 알고리즘 (SM-2 등) |
 | 5 | 이메일 회원가입 | 카카오 없는 유저 대응 |
