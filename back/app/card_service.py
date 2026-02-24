@@ -81,7 +81,10 @@ def _build_system_prompt(template_type: str) -> str:
 
 4. **언어**: 원문 언어와 동일하게 카드를 만드세요 (한국어 원문 → 한국어 카드).
 
-5. **카드 수**: 페이지당 3~5장을 목표로 만드세요. 핵심 개념을 빠짐없이 다루되, 내용이 적으면 더 적게 만들어도 됩니다.
+5. **카드 수**: 주어진 텍스트에서 **가능한 한 많은 카드**를 만드세요 (페이지당 5~8장 목표).
+   - 핵심 개념, 정의, 수치, 분류, 비교 등 시험에 나올 수 있는 모든 포인트를 카드로 만드세요.
+   - 텍스트가 짧더라도 (슬라이드, 요약 등) 키워드와 개념이 있으면 반드시 카드를 만드세요.
+   - 한 문장에서도 여러 개념이 있으면 각각 별도 카드로 만드세요.
    각 카드에 recommend 필드를 추가하세요.
    - recommend: true → 반드시 암기해야 할 핵심 문제
    - recommend: false → 보충 학습용 문제
@@ -107,7 +110,8 @@ def _build_system_prompt(template_type: str) -> str:
 ## 출력 형식
 
 반드시 아래 JSON 배열만 출력하세요. 다른 텍스트, 설명, 마크다운 코드블록을 추가하지 마세요.
-텍스트가 불완전하거나 내용이 부족하면 빈 배열 []을 출력하세요. 절대 설명이나 사과 메시지를 쓰지 마세요.
+텍스트에 학습할 내용이 전혀 없는 경우(목차, 표지 등)에만 빈 배열 []을 출력하세요.
+텍스트가 짧더라도 개념이나 용어가 있으면 반드시 카드를 만드세요. 절대 설명이나 사과 메시지를 쓰지 마세요.
 
 [
   {{
@@ -211,7 +215,7 @@ async def _generate_chunk(pages: List[Dict], template_type: str, chunk_idx: int 
 
 
 MIN_RECOMMEND = 10
-MAX_CARDS = 30
+MAX_CARDS = 50
 CHUNK_SIZE = 5  # 5페이지씩 분할
 
 
@@ -223,7 +227,17 @@ async def generate_cards(pages: List[Dict], template_type: str = "definition") -
     if len(pages) <= CHUNK_SIZE:
         result = await _generate_chunk(pages, template_type, chunk_idx=0)
     else:
-        chunks = [pages[i:i + CHUNK_SIZE] for i in range(0, len(pages), CHUNK_SIZE)]
+        # 5페이지씩 분할 후, 텍스트가 너무 적은 청크는 이전 청크에 합침
+        raw_chunks = [pages[i:i + CHUNK_SIZE] for i in range(0, len(pages), CHUNK_SIZE)]
+        MIN_CHUNK_CHARS = 200
+        chunks: List[List[Dict]] = []
+        for chunk in raw_chunks:
+            chunk_len = sum(len(p["text"]) for p in chunk)
+            if chunks and chunk_len < MIN_CHUNK_CHARS:
+                chunks[-1].extend(chunk)
+                logger.info("짧은 청크 (%d자, %d페이지) → 이전 청크에 병합", chunk_len, len(chunk))
+            else:
+                chunks.append(list(chunk))
         logger.info("PDF %d페이지 → %d청크 병렬 처리", len(pages), len(chunks))
 
         tasks = [_generate_chunk(chunk, template_type, chunk_idx=i) for i, chunk in enumerate(chunks)]
@@ -242,7 +256,7 @@ async def generate_cards(pages: List[Dict], template_type: str = "definition") -
         if failed_chunks > 0:
             logger.warning("전체 %d청크 중 %d개 실패, %d장 수집", len(chunks), failed_chunks, len(result))
 
-    # 30장 초과 시 truncate
+    # 50장 초과 시 truncate
     if len(result) > MAX_CARDS:
         result = result[:MAX_CARDS]
 
