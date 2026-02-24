@@ -8,7 +8,7 @@ from .config import settings
 logger = logging.getLogger(__name__)
 
 # Claude CLI는 Node.js 프로세스 — 동시 실행 수 제한 (메모리 보호)
-_cli_semaphore = asyncio.Semaphore(5)
+_cli_semaphore = asyncio.Semaphore(3)
 
 MEMORY_WARN_MB = 150  # 가용 메모리가 이 이하면 Slack 경고
 _memory_alert_sent = False  # 중복 알림 방지

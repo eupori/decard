@@ -46,5 +46,5 @@ def health():
         "status": "ok",
         "service": "decard",
         "memory": mem,
-        "cli_semaphore": 5,
+        "cli_semaphore": 3,
     }
