@@ -21,7 +21,6 @@ class _StudyScreenState extends State<StudyScreen>
   late List<CardModel> _cards;
   int _currentIndex = 0;
   bool _showBack = false;
-  bool _showEvidence = false;
   bool _isCompleted = false;
   double _dragOffset = 0;
 
@@ -88,7 +87,6 @@ class _StudyScreenState extends State<StudyScreen>
         _currentIndex--;
       }
       _showBack = false;
-      _showEvidence = false;
       _slideAnimOffset = Offset(-endX * 0.3, 0);
       _animRotation = 0;
       _animOpacity = 1.0;
@@ -134,7 +132,6 @@ class _StudyScreenState extends State<StudyScreen>
       _cards.shuffle(Random());
       _currentIndex = 0;
       _showBack = false;
-      _showEvidence = false;
       _isCompleted = false;
       _dragOffset = 0;
       _slideAnimOffset = Offset.zero;
@@ -167,6 +164,64 @@ class _StudyScreenState extends State<StudyScreen>
     setState(() => _isCompleted = true);
   }
 
+  TextStyle _responsiveTextStyle(int length) {
+    final base = Theme.of(context).textTheme;
+    if (length <= 20) {
+      return base.headlineSmall!.copyWith(
+        height: 1.6,
+        fontWeight: FontWeight.w600,
+      );
+    } else if (length <= 80) {
+      return base.titleLarge!.copyWith(
+        height: 1.6,
+        fontWeight: FontWeight.w600,
+      );
+    } else {
+      return base.titleMedium!.copyWith(
+        height: 1.6,
+        fontWeight: FontWeight.w600,
+      );
+    }
+  }
+
+  Widget _buildBackContent(CardModel card, ColorScheme cs) {
+    return Column(
+      key: const ValueKey('back'),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          card.back,
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                height: 1.7,
+                fontWeight: FontWeight.w500,
+              ),
+          textAlign: TextAlign.center,
+        ),
+        if (card.evidence.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Divider(color: cs.outlineVariant, height: 1),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppTheme.evidenceColor.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              'p.${card.evidencePage}: ${card.evidence}',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    height: 1.5,
+                    fontStyle: FontStyle.italic,
+                    color: cs.onSurfaceVariant,
+                  ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isCompleted) return _buildCompletionScreen();
@@ -197,7 +252,7 @@ class _StudyScreenState extends State<StudyScreen>
               child: Row(
                 children: [
                   Text(
-                    '$progress / $total',
+                    '$progress / $total (${(progress / total * 100).round()}%)',
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -227,7 +282,7 @@ class _StudyScreenState extends State<StudyScreen>
             ),
 
             // 카드
-            Expanded(
+            Flexible(
               child: GestureDetector(
                 onTap: () => setState(() => _showBack = !_showBack),
                 onHorizontalDragUpdate: (details) {
@@ -263,6 +318,11 @@ class _StudyScreenState extends State<StudyScreen>
                           ? _animOpacity
                           : (1 - (_dragOffset.abs() / 200))
                               .clamp(0.3, 1.0),
+                      child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight: 280,
+                        maxHeight: MediaQuery.of(context).size.height * 0.55,
+                      ),
                       child: Container(
                       width: double.infinity,
                       margin: const EdgeInsets.symmetric(horizontal: 20),
@@ -332,25 +392,11 @@ class _StudyScreenState extends State<StudyScreen>
                                     child: child,
                                   ),
                                   child: _showBack
-                                      ? Text(
-                                          card.back,
-                                          key: const ValueKey('back'),
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodyLarge
-                                              ?.copyWith(height: 1.6),
-                                          textAlign: TextAlign.center,
-                                        )
+                                      ? _buildBackContent(card, cs)
                                       : ClozeText(
                                           text: card.front,
                                           key: const ValueKey('front'),
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .titleLarge
-                                              ?.copyWith(
-                                                height: 1.6,
-                                                fontWeight: FontWeight.w600,
-                                              ),
+                                          style: _responsiveTextStyle(card.front.length),
                                           textAlign: TextAlign.center,
                                         ),
                                 ),
@@ -358,67 +404,22 @@ class _StudyScreenState extends State<StudyScreen>
                             ),
                           ),
 
-                          // 탭 힌트
-                          Text(
-                            '탭하여 뒤집기 · 스와이프로 넘기기',
-                            style: TextStyle(
-                                fontSize: 12, color: cs.onSurfaceVariant),
-                          ),
+                          // 탭 힌트 (처음 2장만)
+                          if (_currentIndex < 2)
+                            Text(
+                              '탭하여 뒤집기 · 스와이프로 넘기기',
+                              style: TextStyle(
+                                  fontSize: 12, color: cs.onSurfaceVariant),
+                            ),
                         ],
                       ),
+                    ),
                     ),
                   ),
                   ),
                 ),
               ),
             ),
-
-            // 근거 토글
-            if (_showBack && card.evidence.isNotEmpty)
-              Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-                child: Column(
-                  children: [
-                    TextButton.icon(
-                      onPressed: () =>
-                          setState(() => _showEvidence = !_showEvidence),
-                      icon: Icon(
-                        _showEvidence
-                            ? Icons.visibility_off_outlined
-                            : Icons.format_quote_rounded,
-                        size: 18,
-                      ),
-                      label:
-                          Text(_showEvidence ? '근거 숨기기' : '근거 보기'),
-                    ),
-                    if (_showEvidence)
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: AppTheme.evidenceColor
-                              .withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                              color: AppTheme.evidenceColor
-                                  .withValues(alpha: 0.2)),
-                        ),
-                        child: Text(
-                          'p.${card.evidencePage}: ${card.evidence}',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(
-                                height: 1.5,
-                                fontStyle: FontStyle.italic,
-                                color: cs.onSurfaceVariant,
-                              ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
 
             // 이전/다음 버튼
             Padding(
