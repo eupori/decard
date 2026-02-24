@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../services/auth_service.dart';
 import 'home_screen.dart';
 import 'library_screen.dart';
@@ -46,6 +47,7 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   bool _isLoggedIn = false;
+  DateTime? _lastBackPressed;
 
   @override
   void initState() {
@@ -76,7 +78,27 @@ class _MainScreenState extends State<MainScreen> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
-    return ValueListenableBuilder<bool>(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        final now = DateTime.now();
+        if (_lastBackPressed != null &&
+            now.difference(_lastBackPressed!) < const Duration(seconds: 2)) {
+          SystemNavigator.pop();
+        } else {
+          _lastBackPressed = now;
+          ScaffoldMessenger.of(context)
+            ..clearSnackBars()
+            ..showSnackBar(
+              const SnackBar(
+                content: Text('한 번 더 누르면 앱이 종료됩니다'),
+                duration: Duration(seconds: 2),
+              ),
+            );
+        }
+      },
+      child: ValueListenableBuilder<bool>(
       valueListenable: hideBottomNav,
       builder: (context, hidden, _) {
         return Scaffold(
@@ -114,6 +136,7 @@ class _MainScreenState extends State<MainScreen> {
                 ),
         );
       },
+    ),
     );
   }
 
