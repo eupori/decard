@@ -149,40 +149,47 @@ MAX_RETRIES = 3  # 최초 1회 + 재시도 2회
 RETRY_DELAYS = [2, 5, 10]  # 재시도 간 대기 (초)
 
 
-async def _generate_chunk(pages: List[Dict], template_type: str) -> List[Dict]:
+async def _generate_chunk(pages: List[Dict], template_type: str, chunk_idx: int = 0) -> List[Dict]:
     """페이지 청크 하나에 대해 카드를 생성합니다. 실패 시 지수 백오프로 재시도."""
     system_prompt = _build_system_prompt(template_type)
     user_prompt = _build_user_prompt(pages)
 
+    page_nums = [p["page_num"] for p in pages]
+    total_text_len = sum(len(p["text"]) for p in pages)
+    logger.info("청크 #%d 시작: pages=%s, 텍스트=%d자", chunk_idx, page_nums, total_text_len)
+
     last_error = None
+    raw_text = ""
     for attempt in range(MAX_RETRIES):
         try:
             raw_text = await run_claude(system_prompt, user_prompt, model=settings.LLM_MODEL)
             cards_raw = _parse_cards_json(raw_text)
+            logger.info("청크 #%d 파싱 성공 (시도 %d): %d장", chunk_idx, attempt + 1, len(cards_raw))
             break
         except (ValueError, json.JSONDecodeError) as e:
             last_error = e
             if attempt < MAX_RETRIES - 1:
                 delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
-                logger.warning("카드 JSON 파싱 실패 (재시도 %d/%d, %ds 후): %s", attempt + 1, MAX_RETRIES, delay, e)
+                logger.warning("청크 #%d JSON 파싱 실패 (시도 %d/%d, %ds 후): %s | 응답 앞 300자: %s",
+                               chunk_idx, attempt + 1, MAX_RETRIES, delay, e, raw_text[:300])
                 await asyncio.sleep(delay)
             else:
-                logger.error("카드 JSON 파싱 실패 (최종): %s | 응답 앞 500자: %s", e, raw_text[:500])
+                logger.error("청크 #%d JSON 파싱 최종 실패: %s | 응답 앞 500자: %s", chunk_idx, e, raw_text[:500])
                 raise
         except RuntimeError as e:
             last_error = e
             if attempt < MAX_RETRIES - 1:
                 delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
-                logger.warning("Claude CLI 오류 (재시도 %d/%d, %ds 후): %s", attempt + 1, MAX_RETRIES, delay, e)
+                logger.warning("청크 #%d CLI 오류 (시도 %d/%d, %ds 후): %s", chunk_idx, attempt + 1, MAX_RETRIES, delay, e)
                 await asyncio.sleep(delay)
             else:
-                logger.error("Claude CLI 오류 (최종): %s", e)
+                logger.error("청크 #%d CLI 최종 실패: %s", chunk_idx, e)
                 raise
 
     validated = []
     for card in cards_raw:
         if not all(k in card for k in ("front", "back", "evidence", "evidence_page")):
-            logger.warning("필수 필드 누락 카드 스킵: %s", card)
+            logger.warning("청크 #%d 필수 필드 누락 카드 스킵: %s", chunk_idx, card)
             continue
         validated.append({
             "front": str(card["front"]).strip(),
@@ -194,6 +201,12 @@ async def _generate_chunk(pages: List[Dict], template_type: str) -> List[Dict]:
             "recommend": bool(card.get("recommend", True)),
         })
 
+    if not validated and cards_raw:
+        logger.warning("청크 #%d: 파싱된 %d장 중 검증 통과 0장", chunk_idx, len(cards_raw))
+    elif not validated:
+        logger.warning("청크 #%d: 카드 0장 생성됨 (빈 응답)", chunk_idx)
+
+    logger.info("청크 #%d 완료: %d장 검증 통과", chunk_idx, len(validated))
     return validated
 
 
@@ -204,21 +217,30 @@ CHUNK_SIZE = 5  # 5페이지씩 분할
 
 async def generate_cards(pages: List[Dict], template_type: str = "definition") -> List[Dict]:
     """PDF 텍스트에서 Claude를 이용해 암기카드를 생성합니다. 청크 병렬 처리 + 3단계 검수."""
+    total_text_len = sum(len(p["text"]) for p in pages)
+    logger.info("카드 생성 시작: %d페이지, 총 %d자, 템플릿=%s", len(pages), total_text_len, template_type)
+
     if len(pages) <= CHUNK_SIZE:
-        result = await _generate_chunk(pages, template_type)
+        result = await _generate_chunk(pages, template_type, chunk_idx=0)
     else:
         chunks = [pages[i:i + CHUNK_SIZE] for i in range(0, len(pages), CHUNK_SIZE)]
         logger.info("PDF %d페이지 → %d청크 병렬 처리", len(pages), len(chunks))
 
-        tasks = [_generate_chunk(chunk, template_type) for chunk in chunks]
+        tasks = [_generate_chunk(chunk, template_type, chunk_idx=i) for i, chunk in enumerate(chunks)]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         result = []
-        for r in results:
+        failed_chunks = 0
+        for i, r in enumerate(results):
             if isinstance(r, Exception):
-                logger.warning("청크 처리 실패: %s", r)
+                failed_chunks += 1
+                logger.error("청크 #%d 예외 실패: %s: %s", i, type(r).__name__, r)
                 continue
+            logger.info("청크 #%d 결과: %d장", i, len(r))
             result.extend(r)
+
+        if failed_chunks > 0:
+            logger.warning("전체 %d청크 중 %d개 실패, %d장 수집", len(chunks), failed_chunks, len(result))
 
     # 30장 초과 시 truncate
     if len(result) > MAX_CARDS:

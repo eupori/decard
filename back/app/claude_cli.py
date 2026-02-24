@@ -66,22 +66,27 @@ async def run_claude(
     # CLAUDE_CODE_OAUTH_TOKEN 등 인증 관련 env는 유지
     env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
-    logger.debug("CLI 실행 대기: %s", " ".join(cmd))
+    logger.info("CLI 실행 대기 (model=%s, prompt=%d chars)", model or "default", len(user_prompt))
 
     async with _cli_semaphore:
         await _warn_if_low_memory()
         raw = await _run_cli(cmd, env, user_prompt)
 
+    logger.info("CLI 응답 수신: %d chars", len(raw))
+
     # --output-format json → {"type":"result","result":"..."}
     try:
         parsed = json.loads(raw)
-        return parsed.get("result", raw)
+        result_text = parsed.get("result", raw)
+        logger.info("CLI 결과 파싱 완료: %d chars, 앞 200자: %s", len(result_text), result_text[:200])
+        return result_text
     except (json.JSONDecodeError, AttributeError):
+        logger.warning("CLI JSON 파싱 실패, raw 반환: 앞 200자: %s", raw[:200])
         return raw
 
 
 async def _run_cli(cmd: list, env: dict, user_prompt: str) -> str:
-    logger.debug("CLI 실행 시작")
+    logger.info("CLI 프로세스 시작")
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -103,12 +108,13 @@ async def _run_cli(cmd: list, env: dict, user_prompt: str) -> str:
 
     if proc.returncode != 0:
         err_msg = stderr.decode("utf-8", errors="replace").strip()
-        logger.error("Claude CLI 오류 (code %d): %s", proc.returncode, err_msg)
-        raise RuntimeError(f"Claude CLI 실패 (code {proc.returncode}): {err_msg}")
+        logger.error("Claude CLI 오류 (code %d): %s", proc.returncode, err_msg[:500])
+        raise RuntimeError(f"Claude CLI 실패 (code {proc.returncode}): {err_msg[:300]}")
 
     result = stdout.decode("utf-8").strip()
     if not result:
-        err_hint = stderr.decode("utf-8", errors="replace").strip()[:200]
+        err_hint = stderr.decode("utf-8", errors="replace").strip()[:300]
+        logger.error("Claude CLI 빈 응답. stderr: %s", err_hint or "none")
         raise RuntimeError(f"Claude CLI 빈 응답 (stderr: {err_hint or 'none'})")
-    logger.debug("CLI 응답 길이: %d chars", len(result))
+    logger.info("CLI 프로세스 완료: stdout=%d chars, returncode=%d", len(result), proc.returncode)
     return result
