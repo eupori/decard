@@ -1,0 +1,11 @@
+# 환경변수
+back/.env.production
+back/.env
+
+# SQLite
+back/*.db
+back/*.db-shm
+back/*.db-wal
+
+# 전략 문서 (비공개)
+docs/STRATEGY.md
