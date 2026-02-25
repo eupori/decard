@@ -393,6 +393,7 @@ class _StudyScreenState extends State<StudyScreen>
               child: Semantics(
                 label: '카드 탭하여 뒤집기, 스와이프로 넘기기',
                 child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
                 onTap: () => setState(() => _showBack = !_showBack),
                 onHorizontalDragUpdate: (details) {
                   if (_isAnimating) return;
@@ -625,6 +626,10 @@ class _StudyScreenState extends State<StudyScreen>
                         onPressed: _restartInOrder,
                         icon: const Icon(Icons.format_list_numbered_rounded, size: 18),
                         label: const Text('순서 유지'),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: Size.zero,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
                       ),
                     ),
                   ],
@@ -634,6 +639,9 @@ class _StudyScreenState extends State<StudyScreen>
                   onPressed: () => Navigator.pop(context),
                   icon: const Icon(Icons.arrow_back_rounded, size: 18),
                   label: const Text('목록으로'),
+                  style: TextButton.styleFrom(
+                    minimumSize: const Size(0, 44),
+                  ),
                 ),
               ],
             ),

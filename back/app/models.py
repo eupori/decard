@@ -51,6 +51,7 @@ class SessionModel(Base):
     user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
     folder_id = Column(String, ForeignKey("folders.id"), nullable=True, index=True)
     display_name = Column(String, nullable=True)
+    source_type = Column(String, default="pdf")  # pdf / manual / csv / xlsx
     status = Column(String, default="processing")  # processing / completed / failed
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -167,3 +168,16 @@ class SaveToLibraryRequest(BaseModel):
     new_folder_name: Optional[str] = None
     new_folder_color: Optional[str] = None
     display_name: Optional[str] = None
+
+
+# ── Manual Card Schemas ──
+
+class ManualCardInput(BaseModel):
+    front: str
+    back: str
+    evidence: Optional[str] = None
+
+
+class ManualSessionCreate(BaseModel):
+    display_name: Optional[str] = None
+    cards: List[ManualCardInput]

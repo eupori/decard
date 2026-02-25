@@ -36,6 +36,7 @@ def create_tables():
     _migrate_device_id()
     _migrate_users_table()
     _migrate_folders()
+    _migrate_source_type()
 
 
 def _migrate_device_id():
@@ -74,3 +75,12 @@ def _migrate_folders():
     if "display_name" not in columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE sessions ADD COLUMN display_name VARCHAR"))
+
+
+def _migrate_source_type():
+    """Add source_type column to sessions table if missing."""
+    insp = inspect(engine)
+    columns = [c["name"] for c in insp.get_columns("sessions")]
+    if "source_type" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE sessions ADD COLUMN source_type VARCHAR DEFAULT 'pdf'"))

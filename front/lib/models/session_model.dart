@@ -32,6 +32,7 @@ class SessionModel {
   final String? folderId;
   final String? displayName;
   final String createdAt;
+  final String sourceType;
   final List<CardModel> cards;
   final SessionStats stats;
 
@@ -43,6 +44,7 @@ class SessionModel {
     required this.status,
     this.folderId,
     this.displayName,
+    this.sourceType = 'pdf',
     required this.createdAt,
     required this.cards,
     required this.stats,
@@ -57,6 +59,7 @@ class SessionModel {
       status: json['status'] as String,
       folderId: json['folder_id'] as String?,
       displayName: json['display_name'] as String?,
+      sourceType: json['source_type'] as String? ?? 'pdf',
       createdAt: json['created_at'] as String,
       cards: (json['cards'] as List<dynamic>)
           .map((c) => CardModel.fromJson(c as Map<String, dynamic>))

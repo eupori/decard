@@ -15,6 +15,7 @@ from .models import (
     SessionModel, CardModel, GradeModel, FolderModel,
     CardResponse, CardUpdate, SessionResponse, GradeResponse,
     FolderCreate, FolderUpdate, FolderResponse, SaveToLibraryRequest,
+    ManualCardInput, ManualSessionCreate,
 )
 from .pdf_service import extract_text_from_pdf, validate_pdf
 from .card_service import generate_cards
@@ -113,6 +114,7 @@ def list_sessions(request: Request, db: Session = Depends(get_db)):
             "card_count": len(s.cards),
             "folder_id": s.folder_id,
             "display_name": s.display_name,
+            "source_type": s.source_type or "pdf",
             "created_at": s.created_at.isoformat() + "Z",
         }
         for s in sessions
@@ -433,6 +435,7 @@ def list_folder_sessions(
             "card_count": len(s.cards),
             "folder_id": s.folder_id,
             "display_name": s.display_name,
+            "source_type": s.source_type or "pdf",
             "created_at": s.created_at.isoformat() + "Z",
         }
         for s in sessions
@@ -504,6 +507,179 @@ def remove_from_library(
     session.display_name = None
     db.commit()
     return {"removed": session_id}
+
+
+# ──────────────────────────────────────
+# POST /api/v1/sessions/create-manual — 수동 카드 만들기
+# ──────────────────────────────────────
+
+@router.post("/sessions/create-manual")
+def create_manual_session(
+    body: ManualSessionCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    device_id: str = Depends(get_device_id),
+):
+    if not body.cards or len(body.cards) < 1:
+        raise HTTPException(400, "카드를 최소 1장 이상 입력해주세요.")
+    if len(body.cards) > 200:
+        raise HTTPException(400, "카드는 최대 200장까지 입력할 수 있습니다.")
+
+    owner = get_owner_id(request)
+    session = SessionModel(
+        filename=body.display_name or "직접 입력",
+        page_count=0,
+        template_type="definition",
+        device_id=device_id,
+        user_id=owner["user_id"],
+        source_type="manual",
+        status="completed",
+    )
+    db.add(session)
+    db.flush()
+
+    for card_input in body.cards:
+        card = CardModel(
+            session_id=session.id,
+            front=card_input.front,
+            back=card_input.back,
+            evidence=card_input.evidence or "",
+            evidence_page=0,
+            template_type="definition",
+            status="accepted",
+        )
+        db.add(card)
+
+    db.commit()
+    db.refresh(session)
+    return _build_session_response(session)
+
+
+# ──────────────────────────────────────
+# POST /api/v1/sessions/import-file — CSV/XLSX 파일 임포트
+# ──────────────────────────────────────
+
+@router.post("/sessions/import-file")
+async def import_file(
+    request: Request,
+    file: UploadFile = File(...),
+    display_name: str = Form(None),
+    db: Session = Depends(get_db),
+    device_id: str = Depends(get_device_id),
+):
+    # 파일 크기 제한 (5MB)
+    max_size = 5 * 1024 * 1024
+    if file.size and file.size > max_size:
+        raise HTTPException(400, "파일 크기가 5MB를 초과합니다.")
+
+    content = await file.read()
+    if len(content) > max_size:
+        raise HTTPException(400, "파일 크기가 5MB를 초과합니다.")
+
+    filename = file.filename or ""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    if ext == "csv":
+        parsed = _parse_csv(content)
+        source_type = "csv"
+    elif ext == "xlsx":
+        parsed = _parse_xlsx(content)
+        source_type = "xlsx"
+    else:
+        raise HTTPException(400, "지원하지 않는 파일 형식입니다. (csv, xlsx)")
+
+    if not parsed:
+        raise HTTPException(400, "파일에서 카드를 추출할 수 없습니다.")
+    if len(parsed) > 500:
+        raise HTTPException(400, "카드는 최대 500장까지 가져올 수 있습니다.")
+
+    owner = get_owner_id(request)
+    session = SessionModel(
+        filename=display_name or filename or "파일 임포트",
+        page_count=0,
+        template_type="definition",
+        device_id=device_id,
+        user_id=owner["user_id"],
+        source_type=source_type,
+        status="completed",
+    )
+    db.add(session)
+    db.flush()
+
+    for row in parsed:
+        card = CardModel(
+            session_id=session.id,
+            front=row["front"],
+            back=row["back"],
+            evidence=row.get("evidence", ""),
+            evidence_page=0,
+            template_type="definition",
+            status="accepted",
+        )
+        db.add(card)
+
+    db.commit()
+    db.refresh(session)
+    return _build_session_response(session)
+
+
+_HEADER_FRONT = {"front", "앞면", "질문", "question"}
+_HEADER_BACK = {"back", "뒷면", "답", "답변", "answer"}
+
+
+def _parse_csv(content: bytes) -> list[dict]:
+    """CSV 파싱 — BOM 처리, 헤더 자동 감지."""
+    text = content.decode("utf-8-sig")
+    reader = csv.reader(io.StringIO(text))
+    rows = list(reader)
+    if not rows:
+        return []
+
+    # 헤더 감지
+    first_row = [cell.strip().lower() for cell in rows[0]]
+    has_header = bool(set(first_row) & _HEADER_FRONT) or bool(set(first_row) & _HEADER_BACK)
+
+    data_rows = rows[1:] if has_header else rows
+    result = []
+    for row in data_rows:
+        if len(row) < 2:
+            continue
+        front = row[0].strip()
+        back = row[1].strip()
+        if not front or not back:
+            continue
+        evidence = row[2].strip() if len(row) > 2 else ""
+        result.append({"front": front, "back": back, "evidence": evidence})
+    return result
+
+
+def _parse_xlsx(content: bytes) -> list[dict]:
+    """XLSX 파싱 — openpyxl 사용, 헤더 자동 감지."""
+    from openpyxl import load_workbook
+
+    wb = load_workbook(io.BytesIO(content), read_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    wb.close()
+    if not rows:
+        return []
+
+    # 헤더 감지
+    first_row = [str(cell or "").strip().lower() for cell in rows[0]]
+    has_header = bool(set(first_row) & _HEADER_FRONT) or bool(set(first_row) & _HEADER_BACK)
+
+    data_rows = rows[1:] if has_header else rows
+    result = []
+    for row in data_rows:
+        if len(row) < 2:
+            continue
+        front = str(row[0] or "").strip()
+        back = str(row[1] or "").strip()
+        if not front or not back:
+            continue
+        evidence = str(row[2] or "").strip() if len(row) > 2 and row[2] else ""
+        result.append({"front": front, "back": back, "evidence": evidence})
+    return result
 
 
 # ──────────────────────────────────────
@@ -594,6 +770,7 @@ def _build_session_response(session: SessionModel) -> dict:
         "status": session.status,
         "folder_id": session.folder_id,
         "display_name": session.display_name,
+        "source_type": session.source_type or "pdf",
         "created_at": session.created_at.isoformat() + "Z",
         "cards": cards,
         "stats": stats,

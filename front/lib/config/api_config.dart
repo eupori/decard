@@ -15,6 +15,10 @@ class ApiConfig {
   static String get sessionsUrl => '$baseUrl$apiPrefix/sessions';
   static String gradeUrl(String id) => '$baseUrl$apiPrefix/cards/$id/grade';
 
+  // Manual / Import
+  static String get createManualUrl => '$baseUrl$apiPrefix/sessions/create-manual';
+  static String get importFileUrl => '$baseUrl$apiPrefix/sessions/import-file';
+
   // Auth
   static String get kakaoLoginUrl => '$baseUrl$apiPrefix/auth/kakao/login';
   static String get authMeUrl => '$baseUrl$apiPrefix/auth/me';

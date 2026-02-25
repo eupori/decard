@@ -15,6 +15,7 @@ import '../utils/web_auth_stub.dart'
     if (dart.library.html) '../utils/web_auth.dart' as web_auth;
 import 'login_screen.dart';
 import 'main_screen.dart' show hideBottomNav;
+import 'manual_create_screen.dart';
 import 'review_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -550,7 +551,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     _showGenerating = false;
                   });
                   _loadSessions();
-                  showSuccessSnackBar(context, '완료되면 알려드릴게요!');
+                  showInfoSnackBar(context, '완료되면 알려드릴게요!');
                 },
                 icon: const Icon(Icons.home_rounded, size: 18),
                 label: const Text('홈에서 기다릴게요'),
@@ -655,7 +656,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 onPressed: () {
                   setState(() => _showGenerating = false);
                   _loadSessions();
-                  showSuccessSnackBar(context, '완료되면 알려드릴게요!');
+                  showInfoSnackBar(context, '완료되면 알려드릴게요!');
                 },
                 icon: const Icon(Icons.home_rounded),
                 label: const Text('홈으로 돌아가기'),
@@ -897,6 +898,19 @@ class _HomeScreenState extends State<HomeScreen> {
               label: const Text('카드 만들기',
                   style:
                       TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            ),
+
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const ManualCreateScreen()),
+                ).then((_) => _loadSessions());
+              },
+              icon: const Icon(Icons.edit_note_rounded),
+              label: const Text('직접 카드 만들기',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
             ),
 
             const SizedBox(height: 40),

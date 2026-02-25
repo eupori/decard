@@ -334,6 +334,76 @@ class ApiService {
     }
   }
 
+  /// 수동 카드 세션 생성
+  static Future<SessionModel> createManualSession({
+    String? displayName,
+    required List<Map<String, String>> cards,
+  }) async {
+    final hdrs = await _headers();
+    hdrs['Content-Type'] = 'application/json';
+    final body = <String, dynamic>{
+      'cards': cards,
+    };
+    if (displayName != null && displayName.isNotEmpty) {
+      body['display_name'] = displayName;
+    }
+    final response = await http.post(
+      Uri.parse(ApiConfig.createManualUrl),
+      headers: hdrs,
+      body: jsonEncode(body),
+    );
+    if (response.statusCode != 200) {
+      throw ApiException(
+        _extractDetail(response.body) ?? '카드 생성에 실패했습니다.',
+        response.statusCode,
+      );
+    }
+    return SessionModel.fromJson(jsonDecode(response.body));
+  }
+
+  /// 파일(CSV/XLSX) 가져오기로 세션 생성
+  static Future<SessionModel> importFile({
+    Uint8List? bytes,
+    String? filePath,
+    required String fileName,
+    String? displayName,
+  }) async {
+    final headers = await _headers();
+    final formData = dio.FormData.fromMap({
+      'file': filePath != null
+          ? await dio.MultipartFile.fromFile(filePath, filename: fileName)
+          : dio.MultipartFile.fromBytes(bytes!, filename: fileName),
+      if (displayName != null && displayName.isNotEmpty)
+        'display_name': displayName,
+    });
+    final client = dio.Dio(dio.BaseOptions(
+      connectTimeout: const Duration(seconds: 30),
+      sendTimeout: const Duration(seconds: 60),
+      receiveTimeout: const Duration(seconds: 60),
+    ));
+    try {
+      final response = await client.post(
+        ApiConfig.importFileUrl,
+        data: formData,
+        options: dio.Options(headers: headers),
+      );
+      if (response.statusCode != 200) {
+        final detail = response.data is Map ? response.data['detail'] as String? : null;
+        throw ApiException(detail ?? '파일 가져오기에 실패했습니다.', response.statusCode!);
+      }
+      return SessionModel.fromJson(response.data as Map<String, dynamic>);
+    } on dio.DioException catch (e) {
+      if (e.response != null) {
+        final data = e.response?.data;
+        final detail = data is Map ? data['detail'] as String? : null;
+        throw ApiException(detail ?? '파일 가져오기에 실패했습니다.', e.response?.statusCode ?? 500);
+      }
+      throw ApiException('서버에 연결할 수 없습니다.', 0);
+    } finally {
+      client.close();
+    }
+  }
+
   /// AI 채점 (텍스트 + 선택적 손글씨 이미지)
   static Future<Map<String, dynamic>> gradeCard({
     required String cardId,

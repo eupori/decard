@@ -76,7 +76,7 @@ class SessionListItem extends StatelessWidget {
                             ),
                           )
                         : Icon(
-                            _templateIcon(templateType),
+                            _sourceTypeIcon(session['source_type'] as String?, templateType),
                             size: 18,
                             color: cs.primary,
                           ),
@@ -163,6 +163,18 @@ class SessionListItem extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  static IconData _sourceTypeIcon(String? sourceType, String templateType) {
+    switch (sourceType) {
+      case 'manual':
+        return Icons.edit_note_rounded;
+      case 'csv':
+      case 'xlsx':
+        return Icons.upload_file_rounded;
+      default:
+        return _templateIcon(templateType);
+    }
   }
 
   static IconData _templateIcon(String type) {
