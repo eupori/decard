@@ -393,7 +393,22 @@ class ApiException implements Exception {
 }
 
 String friendlyError(Object e) {
-  if (e is ApiException) return e.message;
+  if (e is ApiException) {
+    switch (e.statusCode) {
+      case 401:
+        return '로그인이 만료되었습니다. 다시 로그인해주세요.';
+      case 413:
+        return '파일 크기가 너무 큽니다. 10MB 이하 파일을 사용해주세요.';
+      case 429:
+        return '요청이 너무 많습니다. 잠시 후 다시 시도해주세요.';
+      case 500:
+      case 502:
+      case 503:
+        return '서버에 문제가 발생했습니다. 잠시 후 다시 시도해주세요.';
+      default:
+        return e.message;
+    }
+  }
   if (e is TimeoutException) return '서버 응답이 너무 오래 걸립니다. 잠시 후 다시 시도해주세요.';
   if (e is SocketException) return '서버에 연결할 수 없습니다. 인터넷 연결을 확인해주세요.';
   return '오류가 발생했습니다. 잠시 후 다시 시도해주세요.';

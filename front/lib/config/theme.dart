@@ -159,7 +159,7 @@ class AppTheme {
 
   // 상태 색상
   static const Color acceptedColor = Color(0xFF22C55E);
-  static const Color rejectedColor = Color(0xFFEF4444);
+  static const Color rejectedColor = Color(0xFFDC2626);
   static const Color pendingColor = Color(0xFFF59E0B);
   static const Color evidenceColor = Color(0xFF6290C3);
 }

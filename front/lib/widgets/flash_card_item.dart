@@ -27,6 +27,8 @@ class _FlashCardItemState extends State<FlashCardItem> {
   bool _showBack = false;
   bool _showEvidence = false;
   bool _isEditing = false;
+  String _originalFront = '';
+  String _originalBack = '';
   late TextEditingController _frontCtrl;
   late TextEditingController _backCtrl;
 
@@ -73,11 +75,24 @@ class _FlashCardItemState extends State<FlashCardItem> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 상태 + 페이지 헤더
-          _buildHeader(cs, card),
-
-          // 카드 내용 (탭으로 뒤집기)
-          _isEditing ? _buildEditMode(cs) : _buildCardContent(cs, card),
+          // 헤더 + 콘텐츠: 탭으로 뒤집기 (편집 모드 제외)
+          if (_isEditing)
+            ...[
+              _buildHeader(cs, card),
+              _buildEditMode(cs),
+            ]
+          else
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => setState(() => _showBack = !_showBack),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildHeader(cs, card),
+                  _buildCardContent(cs, card),
+                ],
+              ),
+            ),
 
           // 편집 모드가 아닐 때만 근거 + 액션 표시
           if (!_isEditing) ...[
@@ -140,9 +155,7 @@ class _FlashCardItemState extends State<FlashCardItem> {
   }
 
   Widget _buildCardContent(ColorScheme cs, CardModel card) {
-    return GestureDetector(
-      onTap: () => setState(() => _showBack = !_showBack),
-      child: Container(
+    return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -199,6 +212,53 @@ class _FlashCardItemState extends State<FlashCardItem> {
                   ),
           ],
         ),
+    );
+  }
+
+  void _cancelEditing() {
+    final hasChanges = _frontCtrl.text.trim() != _originalFront ||
+        _backCtrl.text.trim() != _originalBack;
+
+    if (!hasChanges) {
+      setState(() => _isEditing = false);
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('편집 취소'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('수정한 내용이 저장되지 않습니다.\n취소하시겠습니까?'),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('계속 편집'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      setState(() => _isEditing = false);
+                    },
+                    style: FilledButton.styleFrom(
+                      minimumSize: Size.zero,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    child: const Text('취소'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -247,7 +307,7 @@ class _FlashCardItemState extends State<FlashCardItem> {
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
               TextButton(
-                onPressed: () => setState(() => _isEditing = false),
+                onPressed: _cancelEditing,
                 child: const Text('취소'),
               ),
               const SizedBox(width: 8),
@@ -339,6 +399,8 @@ class _FlashCardItemState extends State<FlashCardItem> {
             onPressed: () {
               _frontCtrl.text = card.front;
               _backCtrl.text = card.back;
+              _originalFront = card.front;
+              _originalBack = card.back;
               setState(() => _isEditing = true);
             },
             icon: const Icon(Icons.edit_outlined, size: 20),

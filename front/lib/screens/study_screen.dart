@@ -181,6 +181,20 @@ class _StudyScreenState extends State<StudyScreen>
     });
   }
 
+  void _restartInOrder() {
+    setState(() {
+      _cards = List.from(widget.cards);
+      _currentIndex = 0;
+      _showBack = false;
+      _isCompleted = false;
+      _dragOffset = 0;
+      _slideAnimOffset = Offset.zero;
+      _animRotation = 0;
+      _animOpacity = 1.0;
+      _isAnimating = false;
+    });
+  }
+
   void _springBack() {
     final startOffset = _dragOffset;
     _slideController.reset();
@@ -216,10 +230,15 @@ class _StudyScreenState extends State<StudyScreen>
         height: 1.6,
         fontWeight: FontWeight.w600,
       );
-    } else {
+    } else if (length <= 200) {
       return base.titleMedium!.copyWith(
         height: 1.6,
         fontWeight: FontWeight.w600,
+      );
+    } else {
+      return base.bodyLarge!.copyWith(
+        height: 1.7,
+        fontWeight: FontWeight.w500,
       );
     }
   }
@@ -266,14 +285,22 @@ class _StudyScreenState extends State<StudyScreen>
   Widget _buildBackContent(CardModel card, ColorScheme cs) {
     final formatted = _formatAnswer(card.back);
     final isLong = formatted.length > 40 || formatted.contains('\n');
+    final plainLength = formatted.replaceAll('\u2060', '').length;
+    final style = plainLength > 200
+        ? Theme.of(context).textTheme.bodyLarge?.copyWith(
+              height: 1.7,
+              fontWeight: FontWeight.w500,
+              wordSpacing: 1.2,
+            )
+        : Theme.of(context).textTheme.titleLarge?.copyWith(
+              height: 1.8,
+              fontWeight: FontWeight.w500,
+              wordSpacing: 1.2,
+            );
     return Text(
       formatted,
       key: const ValueKey('back'),
-      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-            height: 1.8,
-            fontWeight: FontWeight.w500,
-            wordSpacing: 1.2,
-          ),
+      style: style,
       textAlign: isLong ? TextAlign.left : TextAlign.center,
       softWrap: true,
       overflow: TextOverflow.visible,
@@ -326,41 +353,46 @@ class _StudyScreenState extends State<StudyScreen>
             Padding(
               padding:
                   const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              child: Row(
-                children: [
-                  Text(
-                    '$progress / $total (${(progress / total * 100).round()}%)',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: cs.primary,
+              child: Semantics(
+                label: '$progress / $total 카드 진행',
+                child: Row(
+                  children: [
+                    Text(
+                      '$progress / $total (${(progress / total * 100).round()}%)',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: cs.primary,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: TweenAnimationBuilder<double>(
-                        tween: Tween(end: progress / total),
-                        duration: const Duration(milliseconds: 300),
-                        curve: Curves.easeInOut,
-                        builder: (context, value, _) =>
-                            LinearProgressIndicator(
-                          value: value,
-                          minHeight: 6,
-                          backgroundColor: cs.surfaceContainerLow,
-                          color: cs.primary,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: TweenAnimationBuilder<double>(
+                          tween: Tween(end: progress / total),
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeInOut,
+                          builder: (context, value, _) =>
+                              LinearProgressIndicator(
+                            value: value,
+                            minHeight: 6,
+                            backgroundColor: cs.surfaceContainerLow,
+                            color: cs.primary,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
 
             // 카드
             Expanded(
-              child: GestureDetector(
+              child: Semantics(
+                label: '카드 탭하여 뒤집기, 스와이프로 넘기기',
+                child: GestureDetector(
                 onTap: () => setState(() => _showBack = !_showBack),
                 onHorizontalDragUpdate: (details) {
                   if (_isAnimating) return;
@@ -493,6 +525,7 @@ class _StudyScreenState extends State<StudyScreen>
                 ),
               ),
             ),
+            ),
 
             // 이전/다음 버튼
             Padding(
@@ -573,19 +606,34 @@ class _StudyScreenState extends State<StudyScreen>
                       ),
                 ),
                 const SizedBox(height: 32),
-                FilledButton.icon(
-                  onPressed: _reshuffle,
-                  icon: const Icon(Icons.refresh_rounded, size: 18),
-                  label: const Text('다시 학습하기'),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: _doReshuffle,
+                        icon: const Icon(Icons.shuffle_rounded, size: 18),
+                        label: const Text('셔플'),
+                        style: FilledButton.styleFrom(
+                          minimumSize: Size.zero,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _restartInOrder,
+                        icon: const Icon(Icons.format_list_numbered_rounded, size: 18),
+                        label: const Text('순서 유지'),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 12),
-                OutlinedButton.icon(
+                TextButton.icon(
                   onPressed: () => Navigator.pop(context),
                   icon: const Icon(Icons.arrow_back_rounded, size: 18),
                   label: const Text('목록으로'),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size(double.infinity, 48),
-                  ),
                 ),
               ],
             ),

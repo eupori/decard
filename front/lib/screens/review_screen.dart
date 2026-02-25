@@ -107,7 +107,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
   void _startStudy() {
     final studyCards = _cards.where((c) => c.isAccepted).toList();
     if (studyCards.isEmpty) {
-      showErrorSnackBar(context, '학습할 카드가 없습니다.');
+      showInfoSnackBar(context, '먼저 카드를 채택해주세요! 채택된 카드만 학습할 수 있습니다.');
       return;
     }
 
@@ -218,20 +218,23 @@ class _ReviewScreenState extends State<ReviewScreen> {
   }
 
   Widget _buildStatsBar(ColorScheme cs) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-      decoration: BoxDecoration(
-        color: cs.surfaceContainerLow,
-        border: Border(bottom: BorderSide(color: cs.outlineVariant, width: 0.5)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
-          _statItem('전체', _cards.length, cs.onSurface),
-          _statItem('대기', _pendingCount, AppTheme.pendingColor),
-          _statItem('채택', _acceptedCount, AppTheme.acceptedColor),
-          _statItem('삭제', _rejectedCount, AppTheme.rejectedColor),
-        ],
+    return Semantics(
+      label: '전체 ${_cards.length}장, 대기 $_pendingCount장, 채택 $_acceptedCount장, 삭제 $_rejectedCount장',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerLow,
+          border: Border(bottom: BorderSide(color: cs.outlineVariant, width: 0.5)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: [
+            _statItem('전체', _cards.length, cs.onSurface),
+            _statItem('대기', _pendingCount, AppTheme.pendingColor),
+            _statItem('채택', _acceptedCount, AppTheme.acceptedColor),
+            _statItem('삭제', _rejectedCount, AppTheme.rejectedColor),
+          ],
+        ),
       ),
     );
   }

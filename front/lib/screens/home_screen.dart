@@ -10,6 +10,7 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/library_prefs.dart';
 import '../utils/snackbar_helper.dart';
+import '../widgets/session_list_item.dart';
 import '../utils/web_auth_stub.dart'
     if (dart.library.html) '../utils/web_auth.dart' as web_auth;
 import 'login_screen.dart';
@@ -27,6 +28,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _selectedFilePath;
   String? _selectedFileName;
   Uint8List? _selectedFileBytes;
+  int? _selectedFileSize;
   String _templateType = 'definition';
   String? _error;
 
@@ -405,6 +407,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _selectedFilePath = kIsWeb ? null : result.files.single.path;
         _selectedFileName = result.files.single.name;
         _selectedFileBytes = result.files.single.bytes;
+        _selectedFileSize = result.files.single.size;
         _error = null;
       });
     }
@@ -800,6 +803,16 @@ class _HomeScreenState extends State<HomeScreen> {
                                     _hasFile ? FontWeight.w600 : null,
                               ),
                     ),
+                    if (_hasFile && _selectedFileSize != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        _formatFileSize(_selectedFileSize!),
+                        style:
+                            Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: cs.onSurfaceVariant,
+                                ),
+                      ),
+                    ],
                     if (!_hasFile) ...[
                       const SizedBox(height: 4),
                       Text(
@@ -842,14 +855,35 @@ class _HomeScreenState extends State<HomeScreen> {
                   color: cs.errorContainer,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.error_outline, color: cs.error, size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                        child: Text(_error!,
-                            style:
-                                TextStyle(color: cs.onErrorContainer))),
+                    Row(
+                      children: [
+                        Icon(Icons.error_outline, color: cs.error, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                            child: Text(_error!,
+                                style:
+                                    TextStyle(color: cs.onErrorContainer))),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: _generate,
+                        icon: Icon(Icons.refresh_rounded,
+                            size: 16, color: cs.error),
+                        label: Text('다시 시도',
+                            style: TextStyle(color: cs.error)),
+                        style: TextButton.styleFrom(
+                          minimumSize: Size.zero,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 6),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -966,7 +1000,25 @@ class _HomeScreenState extends State<HomeScreen> {
               ?.copyWith(fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 12),
-        for (final s in _sessions.take(5)) _buildSessionItem(cs, s),
+        for (final s in _sessions.take(5))
+          SessionListItem(
+            session: s,
+            showFolderIndicator: true,
+            onTap: () {
+              final status = s['status'] as String? ?? 'completed';
+              if (status == 'processing') {
+                showInfoSnackBar(context, '아직 카드를 생성하고 있습니다. 잠시만 기다려주세요.');
+              } else if (status == 'failed') {
+                showErrorSnackBar(context, '카드 생성에 실패한 세션입니다.');
+              } else {
+                _openSession(s['id'] as String);
+              }
+            },
+            onRemove: () => _confirmDeleteSession(
+              s['id'] as String,
+              (s['filename'] as String).replaceAll('.pdf', ''),
+            ),
+          ),
       ],
     );
   }
@@ -1021,196 +1073,10 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildSessionItem(ColorScheme cs, Map<String, dynamic> session) {
-    final filename = (session['filename'] as String).replaceAll('.pdf', '');
-    final cardCount = session['card_count'] as int;
-    final templateType = session['template_type'] as String;
-    final status = session['status'] as String? ?? 'completed';
-    final createdAt = DateTime.tryParse(session['created_at'] as String);
-    final timeAgo = createdAt != null ? _formatTimeAgo(createdAt) : '';
-    final folderId = session['folder_id'] as String?;
-    final isProcessing = status == 'processing';
-    final isFailed = status == 'failed';
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: InkWell(
-        onTap: () {
-          if (isProcessing) {
-            showInfoSnackBar(context, '아직 카드를 생성하고 있습니다. 잠시만 기다려주세요.');
-          } else if (isFailed) {
-            showErrorSnackBar(context, '카드 생성에 실패한 세션입니다.');
-          } else {
-            _openSession(session['id'] as String);
-          }
-        },
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          decoration: BoxDecoration(
-            border: Border.all(
-              color: isFailed
-                  ? cs.error.withValues(alpha: 0.5)
-                  : isProcessing
-                      ? cs.primary.withValues(alpha: 0.3)
-                      : cs.outlineVariant,
-            ),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Row(
-            children: [
-              // Template type icon / status icon
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: isFailed
-                      ? cs.errorContainer.withValues(alpha: 0.5)
-                      : cs.primaryContainer.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: isFailed
-                    ? Icon(Icons.error_outline_rounded,
-                        size: 18, color: cs.error)
-                    : isProcessing
-                        ? SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: Padding(
-                              padding: const EdgeInsets.all(9),
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: cs.primary,
-                              ),
-                            ),
-                          )
-                        : Icon(
-                            _templateIcon(templateType),
-                            size: 18,
-                            color: cs.primary,
-                          ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      filename,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: isFailed ? cs.onSurfaceVariant : null,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      isProcessing
-                          ? '생성 중... · $timeAgo'
-                          : isFailed
-                              ? '생성 실패 · $timeAgo'
-                              : '${_templateLabel(templateType)} · $cardCount장 · $timeAgo',
-                      style:
-                          Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: isFailed
-                                    ? cs.error
-                                    : cs.onSurfaceVariant,
-                              ),
-                    ),
-                  ],
-                ),
-              ),
-              // Folder saved indicator
-              if (folderId != null && !isProcessing && !isFailed)
-                Padding(
-                  padding: const EdgeInsets.only(right: 4),
-                  child: Icon(Icons.folder_rounded,
-                      size: 16, color: cs.primary.withValues(alpha: 0.6)),
-                ),
-              // Card count badge or status indicator
-              if (isProcessing)
-                SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: cs.primary,
-                  ),
-                )
-              else if (!isFailed)
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: cs.primaryContainer.withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    '$cardCount',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: cs.primary,
-                    ),
-                  ),
-                ),
-              const SizedBox(width: 4),
-              IconButton(
-                onPressed: () => _confirmDeleteSession(
-                    session['id'] as String, filename),
-                icon: Icon(Icons.close_rounded,
-                    size: 18, color: cs.onSurfaceVariant),
-                tooltip: '삭제',
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                constraints:
-                    const BoxConstraints(minWidth: 32, minHeight: 32),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  IconData _templateIcon(String type) {
-    switch (type) {
-      case 'definition':
-        return Icons.menu_book_rounded;
-      case 'cloze':
-        return Icons.edit_note_rounded;
-      case 'comparison':
-        return Icons.compare_arrows_rounded;
-      case 'subjective':
-        return Icons.draw_rounded;
-      default:
-        return Icons.description_outlined;
-    }
-  }
-
-  String _formatTimeAgo(DateTime dt) {
-    final diff = DateTime.now().difference(dt);
-    if (diff.inMinutes < 1) return '방금 전';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}분 전';
-    if (diff.inHours < 24) return '${diff.inHours}시간 전';
-    if (diff.inDays < 7) return '${diff.inDays}일 전';
-    return '${dt.month}/${dt.day}';
-  }
-
-  String _templateLabel(String type) {
-    switch (type) {
-      case 'definition':
-        return '정의형';
-      case 'cloze':
-        return '빈칸형';
-      case 'comparison':
-        return '비교형';
-      case 'subjective':
-        return '주관식';
-      default:
-        return type;
-    }
+  String _formatFileSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
   Widget _buildLoginButton(ColorScheme cs) {
