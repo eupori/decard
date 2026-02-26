@@ -404,6 +404,153 @@ class ApiService {
     }
   }
 
+  // ── Explore API ──
+
+  static Future<List<Map<String, dynamic>>> getExploreCategories() async {
+    final response = await http.get(
+      Uri.parse(ApiConfig.exploreCategoriesUrl),
+      headers: await _headers(),
+    );
+    if (response.statusCode != 200) {
+      throw ApiException('카테고리를 불러올 수 없습니다.', response.statusCode);
+    }
+    final list = jsonDecode(response.body) as List;
+    return list.cast<Map<String, dynamic>>();
+  }
+
+  static Future<List<Map<String, dynamic>>> getExploreCardsets({
+    String? category,
+    String sort = 'popular',
+    String? search,
+  }) async {
+    var url = ApiConfig.exploreCardsetsUrl;
+    final params = <String>[];
+    if (category != null) params.add('category=$category');
+    params.add('sort=$sort');
+    if (search != null && search.isNotEmpty) {
+      params.add('search=${Uri.encodeComponent(search)}');
+    }
+    if (params.isNotEmpty) url += '?${params.join('&')}';
+
+    final response = await http.get(
+      Uri.parse(url),
+      headers: await _headers(),
+    );
+    if (response.statusCode != 200) {
+      throw ApiException('카드셋을 불러올 수 없습니다.', response.statusCode);
+    }
+    final list = jsonDecode(response.body) as List;
+    return list.cast<Map<String, dynamic>>();
+  }
+
+  static Future<Map<String, dynamic>> getExploreCardsetDetail(
+      String id) async {
+    final response = await http.get(
+      Uri.parse(ApiConfig.exploreCardsetDetailUrl(id)),
+      headers: await _headers(),
+    );
+    if (response.statusCode != 200) {
+      throw ApiException('카드셋을 불러올 수 없습니다.', response.statusCode);
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  static Future<SessionModel> downloadCardset(String id) async {
+    final hdrs = await _headers();
+    hdrs['Content-Type'] = 'application/json';
+    final response = await http.post(
+      Uri.parse(ApiConfig.exploreDownloadUrl(id)),
+      headers: hdrs,
+    );
+    if (response.statusCode != 200) {
+      throw ApiException(
+        _extractDetail(response.body) ?? '카드셋 추가에 실패했습니다.',
+        response.statusCode,
+      );
+    }
+    return SessionModel.fromJson(jsonDecode(response.body));
+  }
+
+  static Future<Map<String, dynamic>> publishSession({
+    required String sessionId,
+    required String title,
+    String description = '',
+    String category = 'etc',
+  }) async {
+    final hdrs = await _headers();
+    hdrs['Content-Type'] = 'application/json';
+    final response = await http.post(
+      Uri.parse(ApiConfig.explorePublishUrl),
+      headers: hdrs,
+      body: jsonEncode({
+        'session_id': sessionId,
+        'title': title,
+        'description': description,
+        'category': category,
+      }),
+    );
+    if (response.statusCode != 200) {
+      throw ApiException(
+        _extractDetail(response.body) ?? '카드셋 공유에 실패했습니다.',
+        response.statusCode,
+      );
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  // ── SRS API ──
+
+  /// 카드 복습 결과 기록
+  static Future<Map<String, dynamic>> reviewCard({
+    required String cardId,
+    required int rating,
+  }) async {
+    final hdrs = await _headers();
+    hdrs['Content-Type'] = 'application/json';
+    final response = await http.post(
+      Uri.parse(ApiConfig.reviewUrl(cardId)),
+      headers: hdrs,
+      body: jsonEncode({'rating': rating}),
+    );
+    if (response.statusCode != 200) {
+      throw ApiException(
+        _extractDetail(response.body) ?? '복습 기록에 실패했습니다.',
+        response.statusCode,
+      );
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  /// 오늘 복습할 카드 목록
+  static Future<List<Map<String, dynamic>>> getDueCards({
+    String? folderId,
+    int limit = 50,
+  }) async {
+    var url = '${ApiConfig.studyDueUrl}?limit=$limit';
+    if (folderId != null) url += '&folder_id=$folderId';
+    final response = await http.get(
+      Uri.parse(url),
+      headers: await _headers(),
+    );
+    if (response.statusCode != 200) {
+      throw ApiException('복습 카드를 불러올 수 없습니다.', response.statusCode);
+    }
+    final list = jsonDecode(response.body) as List;
+    return list.cast<Map<String, dynamic>>();
+  }
+
+  /// 학습 통계
+  static Future<Map<String, dynamic>> getStudyStats() async {
+    final response = await http.get(
+      Uri.parse(ApiConfig.studyStatsUrl),
+      headers: await _headers(),
+    );
+    if (response.statusCode != 200) {
+      throw ApiException('학습 통계를 불러올 수 없습니다.', response.statusCode);
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
   /// AI 채점 (텍스트 + 선택적 손글씨 이미지)
   static Future<Map<String, dynamic>> gradeCard({
     required String cardId,

@@ -2,6 +2,7 @@ import asyncio
 import csv
 import io
 import logging
+from datetime import timedelta
 from typing import Optional
 
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, Request
@@ -12,14 +13,18 @@ from .auth import get_device_id, get_owner_filter, get_owner_filter_for_folder, 
 from .config import settings
 from .database import get_db, SessionLocal
 from .models import (
-    SessionModel, CardModel, GradeModel, FolderModel,
+    SessionModel, CardModel, GradeModel, FolderModel, CardReviewModel,
+    PublicCardsetModel, PublicCardModel,
     CardResponse, CardUpdate, SessionResponse, GradeResponse,
     FolderCreate, FolderUpdate, FolderResponse, SaveToLibraryRequest,
     ManualCardInput, ManualSessionCreate,
+    ReviewRequest, ReviewResponse, StudyStatsResponse,
+    PublishRequest,
 )
 from .pdf_service import extract_text_from_pdf, validate_pdf
 from .card_service import generate_cards
 from .grade_service import grade_answer
+from .srs_service import calculate_sm2
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1")
@@ -525,11 +530,19 @@ def create_manual_session(
     if len(body.cards) > 200:
         raise HTTPException(400, "카드는 최대 200장까지 입력할 수 있습니다.")
 
+    ALLOWED_MANUAL_TYPES = {"definition", "multiple_choice", "cloze"}
+    for card_input in body.cards:
+        if card_input.template_type not in ALLOWED_MANUAL_TYPES:
+            raise HTTPException(400, f"지원하지 않는 카드 유형입니다: {card_input.template_type}")
+
+    # 세션 template_type: 첫 번째 카드 유형 사용 (혼합 가능)
+    session_template = body.cards[0].template_type if body.cards else "definition"
+
     owner = get_owner_id(request)
     session = SessionModel(
         filename=body.display_name or "직접 입력",
         page_count=0,
-        template_type="definition",
+        template_type=session_template,
         device_id=device_id,
         user_id=owner["user_id"],
         source_type="manual",
@@ -545,7 +558,7 @@ def create_manual_session(
             back=card_input.back,
             evidence=card_input.evidence or "",
             evidence_page=0,
-            template_type="definition",
+            template_type=card_input.template_type,
             status="accepted",
         )
         db.add(card)
@@ -733,6 +746,473 @@ async def _generate_in_background(
     finally:
         db.close()
 
+
+# ──────────────────────────────────────
+# SRS — 간격 반복 학습
+# ──────────────────────────────────────
+
+@router.post("/cards/{card_id}/review")
+def review_card(
+    card_id: str,
+    body: ReviewRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    device_id: str = Depends(get_device_id),
+):
+    """카드 복습 결과 기록 (SM-2)."""
+    card = db.query(CardModel).filter(CardModel.id == card_id).first()
+    if not card:
+        raise HTTPException(404, "카드를 찾을 수 없습니다.")
+
+    if body.rating < 1 or body.rating > 4:
+        raise HTTPException(400, "rating은 1~4 사이여야 합니다.")
+
+    owner = get_owner_id(request)
+
+    # 이전 복습 기록 조회 (최신 1건)
+    prev_review = (
+        db.query(CardReviewModel)
+        .filter(CardReviewModel.card_id == card_id)
+        .order_by(CardReviewModel.reviewed_at.desc())
+        .first()
+    )
+
+    prev_interval = prev_review.interval_days if prev_review else 0
+    prev_ease = prev_review.ease_factor if prev_review else 2.5
+
+    new_interval, new_ease, due_date = calculate_sm2(
+        body.rating, prev_interval, prev_ease
+    )
+
+    review = CardReviewModel(
+        card_id=card_id,
+        user_id=owner["user_id"],
+        device_id=device_id,
+        rating=body.rating,
+        interval_days=new_interval,
+        ease_factor=new_ease,
+        due_date=due_date,
+    )
+    db.add(review)
+    db.commit()
+    db.refresh(review)
+
+    return ReviewResponse(
+        id=review.id,
+        card_id=card_id,
+        rating=body.rating,
+        interval_days=new_interval,
+        ease_factor=new_ease,
+        due_date=due_date.isoformat() + "Z",
+    ).model_dump()
+
+
+@router.get("/study/due")
+def get_due_cards(
+    request: Request,
+    folder_id: Optional[str] = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    """오늘 복습할 카드 목록 (due_date <= now + 미복습 카드)."""
+    from datetime import datetime as dt
+    from sqlalchemy import func
+
+    owner_filter = get_owner_filter(request)
+    now = dt.utcnow()
+
+    # accepted 카드만 대상
+    base_query = owner_filter(
+        db.query(CardModel)
+        .join(SessionModel, CardModel.session_id == SessionModel.id)
+        .filter(CardModel.status == "accepted")
+    )
+
+    if folder_id:
+        base_query = base_query.filter(SessionModel.folder_id == folder_id)
+
+    all_cards = base_query.all()
+
+    due_cards = []
+    new_cards = []
+
+    for card in all_cards:
+        latest_review = (
+            db.query(CardReviewModel)
+            .filter(CardReviewModel.card_id == card.id)
+            .order_by(CardReviewModel.reviewed_at.desc())
+            .first()
+        )
+
+        if latest_review is None:
+            new_cards.append(card)
+        elif latest_review.due_date <= now:
+            due_cards.append((card, latest_review))
+
+    # 복습 카드 우선, 그다음 새 카드
+    result = []
+    for card, review in due_cards[:limit]:
+        resp = _card_to_response(card)
+        resp["due_date"] = review.due_date.isoformat() + "Z"
+        resp["interval_days"] = review.interval_days
+        resp["ease_factor"] = review.ease_factor
+        resp["session_filename"] = card.session.filename if card.session else ""
+        result.append(resp)
+
+    remaining = limit - len(result)
+    for card in new_cards[:remaining]:
+        resp = _card_to_response(card)
+        resp["due_date"] = None
+        resp["interval_days"] = 0
+        resp["ease_factor"] = 2.5
+        resp["session_filename"] = card.session.filename if card.session else ""
+        result.append(resp)
+
+    return result
+
+
+@router.get("/study/stats")
+def get_study_stats(
+    request: Request,
+    db: Session = Depends(get_db),
+    device_id: str = Depends(get_device_id),
+):
+    """학습 통계: 오늘 복습 수, 마스터 카드, 스트릭, 복습 대기 카드."""
+    from datetime import datetime as dt
+
+    owner = get_owner_id(request)
+    now = dt.utcnow()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # 소유자 필터
+    if owner["user_id"]:
+        owner_cond = CardReviewModel.user_id == owner["user_id"]
+    else:
+        owner_cond = CardReviewModel.device_id == device_id
+
+    # 오늘 복습 수
+    reviews_today = (
+        db.query(CardReviewModel)
+        .filter(owner_cond, CardReviewModel.reviewed_at >= today_start)
+        .count()
+    )
+
+    # 마스터 카드 (interval >= 21일, 가장 최근 복습 기준)
+    from sqlalchemy import func
+    latest_reviews = (
+        db.query(
+            CardReviewModel.card_id,
+            func.max(CardReviewModel.reviewed_at).label("latest"),
+        )
+        .filter(owner_cond)
+        .group_by(CardReviewModel.card_id)
+        .subquery()
+    )
+    mastered = (
+        db.query(CardReviewModel)
+        .join(
+            latest_reviews,
+            (CardReviewModel.card_id == latest_reviews.c.card_id)
+            & (CardReviewModel.reviewed_at == latest_reviews.c.latest),
+        )
+        .filter(CardReviewModel.interval_days >= 21)
+        .count()
+    )
+
+    # 스트릭 (연속 학습일)
+    all_review_dates = (
+        db.query(func.date(CardReviewModel.reviewed_at))
+        .filter(owner_cond)
+        .distinct()
+        .order_by(func.date(CardReviewModel.reviewed_at).desc())
+        .all()
+    )
+
+    streak = 0
+    expected_date = now.date()
+    for (review_date,) in all_review_dates:
+        if isinstance(review_date, str):
+            from datetime import date
+            review_date = date.fromisoformat(review_date)
+        if review_date == expected_date:
+            streak += 1
+            expected_date -= timedelta(days=1)
+        elif review_date == expected_date + timedelta(days=1):
+            # 오늘 아직 안 했으면 어제부터 카운트
+            if streak == 0:
+                expected_date = review_date
+                streak += 1
+                expected_date -= timedelta(days=1)
+            else:
+                break
+        else:
+            break
+
+    # 복습 대기 카드 수
+    owner_filter = get_owner_filter(request)
+    all_accepted = (
+        owner_filter(
+            db.query(CardModel)
+            .join(SessionModel, CardModel.session_id == SessionModel.id)
+            .filter(CardModel.status == "accepted")
+        )
+        .all()
+    )
+
+    due_count = 0
+    for card in all_accepted:
+        latest = (
+            db.query(CardReviewModel)
+            .filter(CardReviewModel.card_id == card.id)
+            .order_by(CardReviewModel.reviewed_at.desc())
+            .first()
+        )
+        if latest is None or latest.due_date <= now:
+            due_count += 1
+
+    return StudyStatsResponse(
+        reviews_today=reviews_today,
+        mastered_cards=mastered,
+        streak_days=streak,
+        due_cards=due_count,
+    ).model_dump()
+
+
+# ──────────────────────────────────────
+# Explore — 공개 카드셋 탐색
+# ──────────────────────────────────────
+
+CATEGORIES = {
+    "language": {"name": "어학", "icon": "translate", "subcategories": ["JLPT", "TOEIC", "HSK"]},
+    "it": {"name": "IT/컴퓨터", "icon": "computer", "subcategories": ["정보처리기사", "컴활", "SQLD"]},
+    "law": {"name": "법/행정", "icon": "gavel", "subcategories": ["행정사", "공인중개사"]},
+    "business": {"name": "경영/경제", "icon": "business", "subcategories": ["한경TESAT", "매경TEST"]},
+    "education": {"name": "교육", "icon": "school", "subcategories": ["교육학", "교원임용"]},
+    "etc": {"name": "기타", "icon": "category", "subcategories": []},
+}
+
+
+@router.get("/explore/categories")
+def list_categories(db: Session = Depends(get_db)):
+    """카테고리 목록 + 각 카테고리별 published 카드셋 수."""
+    result = []
+    for key, info in CATEGORIES.items():
+        count = (
+            db.query(PublicCardsetModel)
+            .filter(PublicCardsetModel.category == key, PublicCardsetModel.status == "published")
+            .count()
+        )
+        result.append({
+            "id": key,
+            "name": info["name"],
+            "icon": info["icon"],
+            "subcategories": info["subcategories"],
+            "cardset_count": count,
+        })
+    return result
+
+
+@router.get("/explore/cardsets")
+def list_cardsets(
+    category: Optional[str] = None,
+    sort: str = "popular",
+    search: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """공개 카드셋 목록 (카테고리/정렬/검색 필터)."""
+    query = db.query(PublicCardsetModel).filter(PublicCardsetModel.status == "published")
+
+    if category:
+        query = query.filter(PublicCardsetModel.category == category)
+    if search:
+        query = query.filter(PublicCardsetModel.title.like(f"%{search}%"))
+
+    if sort == "latest":
+        query = query.order_by(PublicCardsetModel.created_at.desc())
+    else:
+        query = query.order_by(PublicCardsetModel.download_count.desc())
+
+    cardsets = query.limit(50).all()
+    return [
+        {
+            "id": cs.id,
+            "title": cs.title,
+            "description": cs.description,
+            "category": cs.category,
+            "tags": cs.tags,
+            "card_count": cs.card_count,
+            "download_count": cs.download_count,
+            "author_name": cs.author_name,
+            "is_featured": cs.is_featured,
+            "created_at": cs.created_at.isoformat() + "Z",
+        }
+        for cs in cardsets
+    ]
+
+
+@router.get("/explore/cardsets/{cardset_id}")
+def get_cardset(cardset_id: str, db: Session = Depends(get_db)):
+    """공개 카드셋 상세 + 카드 전체."""
+    cs = db.query(PublicCardsetModel).filter(PublicCardsetModel.id == cardset_id).first()
+    if not cs:
+        raise HTTPException(404, "카드셋을 찾을 수 없습니다.")
+
+    cards = (
+        db.query(PublicCardModel)
+        .filter(PublicCardModel.cardset_id == cardset_id)
+        .order_by(PublicCardModel.sort_order)
+        .all()
+    )
+    return {
+        "id": cs.id,
+        "title": cs.title,
+        "description": cs.description,
+        "category": cs.category,
+        "tags": cs.tags,
+        "card_count": cs.card_count,
+        "download_count": cs.download_count,
+        "author_name": cs.author_name,
+        "is_featured": cs.is_featured,
+        "created_at": cs.created_at.isoformat() + "Z",
+        "cards": [
+            {
+                "id": c.id,
+                "front": c.front,
+                "back": c.back,
+                "evidence": c.evidence,
+                "template_type": c.template_type,
+                "sort_order": c.sort_order,
+            }
+            for c in cards
+        ],
+    }
+
+
+@router.post("/explore/cardsets/{cardset_id}/download")
+def download_cardset(
+    cardset_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    device_id: str = Depends(get_device_id),
+):
+    """공개 카드셋을 유저의 세션+카드로 복사 (로그인 필수)."""
+    owner = get_owner_id(request)
+    if not owner["user_id"]:
+        raise HTTPException(401, "로그인이 필요합니다.")
+
+    cs = db.query(PublicCardsetModel).filter(PublicCardsetModel.id == cardset_id).first()
+    if not cs:
+        raise HTTPException(404, "카드셋을 찾을 수 없습니다.")
+
+    pub_cards = (
+        db.query(PublicCardModel)
+        .filter(PublicCardModel.cardset_id == cardset_id)
+        .order_by(PublicCardModel.sort_order)
+        .all()
+    )
+
+    # 유저 세션 생성
+    session = SessionModel(
+        filename=cs.title,
+        page_count=0,
+        template_type=pub_cards[0].template_type if pub_cards else "definition",
+        device_id=device_id,
+        user_id=owner["user_id"],
+        source_type="explore",
+        status="completed",
+    )
+    db.add(session)
+    db.flush()
+
+    # 카드 복사
+    for pc in pub_cards:
+        card = CardModel(
+            session_id=session.id,
+            front=pc.front,
+            back=pc.back,
+            evidence=pc.evidence,
+            evidence_page=0,
+            template_type=pc.template_type,
+            status="accepted",
+        )
+        db.add(card)
+
+    # download_count 증가
+    cs.download_count += 1
+    db.commit()
+    db.refresh(session)
+
+    return _build_session_response(session)
+
+
+@router.post("/explore/publish")
+def publish_cardset(
+    body: PublishRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """유저 세션의 accepted 카드를 공개 카드셋으로 발행 (로그인 필수)."""
+    owner = get_owner_id(request)
+    if not owner["user_id"]:
+        raise HTTPException(401, "로그인이 필요합니다.")
+
+    owner_filter = get_owner_filter(request)
+    session = owner_filter(
+        db.query(SessionModel).filter(SessionModel.id == body.session_id)
+    ).first()
+    if not session:
+        raise HTTPException(404, "세션을 찾을 수 없습니다.")
+
+    accepted_cards = [c for c in session.cards if c.status == "accepted"]
+    if not accepted_cards:
+        raise HTTPException(400, "채택된 카드가 없습니다.")
+
+    # 유저 정보 조회
+    from .models import UserModel
+    user = db.query(UserModel).filter(UserModel.id == owner["user_id"]).first()
+    author_name = user.nickname if user and user.nickname else "데카드"
+
+    category = body.category if body.category in CATEGORIES else "etc"
+
+    cardset = PublicCardsetModel(
+        title=body.title,
+        description=body.description,
+        category=category,
+        author_id=owner["user_id"],
+        author_name=author_name,
+        card_count=len(accepted_cards),
+    )
+    db.add(cardset)
+    db.flush()
+
+    for idx, card in enumerate(accepted_cards):
+        pub_card = PublicCardModel(
+            cardset_id=cardset.id,
+            front=card.front,
+            back=card.back,
+            evidence=card.evidence,
+            template_type=card.template_type,
+            sort_order=idx,
+        )
+        db.add(pub_card)
+
+    db.commit()
+    db.refresh(cardset)
+
+    return {
+        "id": cardset.id,
+        "title": cardset.title,
+        "description": cardset.description,
+        "category": cardset.category,
+        "card_count": cardset.card_count,
+        "author_name": cardset.author_name,
+        "created_at": cardset.created_at.isoformat() + "Z",
+    }
+
+
+# ──────────────────────────────────────
+# Helpers
+# ──────────────────────────────────────
 
 def _safe_error(detail: str, exc: Exception) -> str:
     """Hide internal error details in production."""

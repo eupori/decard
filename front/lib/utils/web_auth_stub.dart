@@ -2,3 +2,4 @@
 String? extractTokenFromUrl() => null;
 String? extractAuthErrorFromUrl() => null;
 void navigateTo(String url) {}
+void clearUrlFragment() {}

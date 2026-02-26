@@ -37,6 +37,8 @@ def create_tables():
     _migrate_users_table()
     _migrate_folders()
     _migrate_source_type()
+    _migrate_card_reviews()
+    _migrate_public_cardsets()
 
 
 def _migrate_device_id():
@@ -84,3 +86,26 @@ def _migrate_source_type():
     if "source_type" not in columns:
         with engine.begin() as conn:
             conn.execute(text("ALTER TABLE sessions ADD COLUMN source_type VARCHAR DEFAULT 'pdf'"))
+
+
+def _migrate_card_reviews():
+    """card_reviews 테이블은 create_all에서 생성됨. 인덱스만 보장."""
+    insp = inspect(engine)
+    if "card_reviews" not in insp.get_table_names():
+        return  # create_all에서 이미 생성
+    # 추가 인덱스 (이미 모델에 정의되어 있으므로 보통 불필요하지만, 안전장치)
+    with engine.begin() as conn:
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_card_reviews_card_id ON card_reviews (card_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_card_reviews_user_id ON card_reviews (user_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_card_reviews_device_id ON card_reviews (device_id)"))
+
+
+def _migrate_public_cardsets():
+    """public_cardsets, public_cards 테이블은 create_all에서 생성됨. 인덱스만 보장."""
+    insp = inspect(engine)
+    if "public_cardsets" not in insp.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_public_cardsets_category ON public_cardsets (category)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_public_cardsets_status ON public_cardsets (status)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_public_cards_cardset_id ON public_cards (cardset_id)"))

@@ -15,6 +15,11 @@ class ApiConfig {
   static String get sessionsUrl => '$baseUrl$apiPrefix/sessions';
   static String gradeUrl(String id) => '$baseUrl$apiPrefix/cards/$id/grade';
 
+  // SRS
+  static String reviewUrl(String cardId) => '$baseUrl$apiPrefix/cards/$cardId/review';
+  static String get studyDueUrl => '$baseUrl$apiPrefix/study/due';
+  static String get studyStatsUrl => '$baseUrl$apiPrefix/study/stats';
+
   // Manual / Import
   static String get createManualUrl => '$baseUrl$apiPrefix/sessions/create-manual';
   static String get importFileUrl => '$baseUrl$apiPrefix/sessions/import-file';
@@ -33,4 +38,11 @@ class ApiConfig {
       '$baseUrl$apiPrefix/sessions/$sessionId/save-to-library';
   static String removeFromLibraryUrl(String sessionId) =>
       '$baseUrl$apiPrefix/sessions/$sessionId/remove-from-library';
+
+  // Explore
+  static String get exploreCategoriesUrl => '$baseUrl$apiPrefix/explore/categories';
+  static String get exploreCardsetsUrl => '$baseUrl$apiPrefix/explore/cardsets';
+  static String exploreCardsetDetailUrl(String id) => '$baseUrl$apiPrefix/explore/cardsets/$id';
+  static String exploreDownloadUrl(String id) => '$baseUrl$apiPrefix/explore/cardsets/$id/download';
+  static String get explorePublishUrl => '$baseUrl$apiPrefix/explore/publish';
 }

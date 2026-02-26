@@ -4,13 +4,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../config/theme.dart';
 import '../models/card_model.dart';
+import '../services/api_service.dart';
 import '../utils/cloze_text.dart';
 
 class StudyScreen extends StatefulWidget {
   final List<CardModel> cards;
   final String title;
+  /// SRS 모드: true이면 카드 뒷면 확인 후 4단계 평가 UI 표시
+  final bool srsMode;
 
-  const StudyScreen({super.key, required this.cards, required this.title});
+  const StudyScreen({
+    super.key,
+    required this.cards,
+    required this.title,
+    this.srsMode = false,
+  });
 
   @override
   State<StudyScreen> createState() => _StudyScreenState();
@@ -23,6 +31,8 @@ class _StudyScreenState extends State<StudyScreen>
   bool _showBack = false;
   bool _isCompleted = false;
   double _dragOffset = 0;
+  bool _isRating = false; // SRS 평가 진행 중
+  int _reviewedCount = 0;
 
   late AnimationController _slideController;
   Offset _slideAnimOffset = Offset.zero;
@@ -216,6 +226,61 @@ class _StudyScreenState extends State<StudyScreen>
 
   void _complete() {
     setState(() => _isCompleted = true);
+  }
+
+  Widget _buildRatingButtons(ColorScheme cs) {
+    const ratings = [
+      (1, '다시', Color(0xFFEF4444), Icons.refresh_rounded),
+      (2, '어려움', Color(0xFFF59E0B), Icons.sentiment_dissatisfied_rounded),
+      (3, '좋음', Color(0xFF22C55E), Icons.sentiment_satisfied_rounded),
+      (4, '쉬움', Color(0xFF3B82F6), Icons.sentiment_very_satisfied_rounded),
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      child: Row(
+        children: [
+          for (int i = 0; i < ratings.length; i++) ...[
+            if (i > 0) const SizedBox(width: 8),
+            Expanded(
+              child: _RatingButton(
+                rating: ratings[i].$1,
+                label: ratings[i].$2,
+                color: ratings[i].$3,
+                icon: ratings[i].$4,
+                enabled: !_isRating,
+                onTap: () => _handleRate(ratings[i].$1),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleRate(int rating) async {
+    if (_isRating) return;
+    setState(() => _isRating = true);
+
+    try {
+      final card = _cards[_currentIndex];
+      await ApiService.reviewCard(cardId: card.id, rating: rating);
+      _reviewedCount++;
+    } catch (_) {
+      // 리뷰 실패해도 학습 흐름은 계속
+    }
+
+    if (!mounted) return;
+
+    if (_currentIndex < _cards.length - 1) {
+      setState(() => _isRating = false);
+      _animateSlideOut(1);
+    } else {
+      setState(() {
+        _isRating = false;
+        _isCompleted = true;
+      });
+    }
   }
 
   TextStyle _responsiveTextStyle(int length) {
@@ -528,39 +593,42 @@ class _StudyScreenState extends State<StudyScreen>
             ),
             ),
 
-            // 이전/다음 버튼
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _currentIndex > 0 ? _prev : null,
-                      icon:
-                          const Icon(Icons.arrow_back_rounded, size: 18),
-                      label: const Text('이전'),
+            // 하단 버튼
+            if (widget.srsMode && _showBack)
+              _buildRatingButtons(cs)
+            else
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _currentIndex > 0 ? _prev : null,
+                        icon:
+                            const Icon(Icons.arrow_back_rounded, size: 18),
+                        label: const Text('이전'),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _currentIndex < _cards.length - 1
-                        ? FilledButton.icon(
-                            onPressed: _next,
-                            icon: const Icon(
-                                Icons.arrow_forward_rounded,
-                                size: 18),
-                            label: const Text('다음'),
-                          )
-                        : FilledButton.icon(
-                            onPressed: _complete,
-                            icon: const Icon(Icons.check_rounded,
-                                size: 18),
-                            label: const Text('완료'),
-                          ),
-                  ),
-                ],
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _currentIndex < _cards.length - 1
+                          ? FilledButton.icon(
+                              onPressed: _next,
+                              icon: const Icon(
+                                  Icons.arrow_forward_rounded,
+                                  size: 18),
+                              label: const Text('다음'),
+                            )
+                          : FilledButton.icon(
+                              onPressed: _complete,
+                              icon: const Icon(Icons.check_rounded,
+                                  size: 18),
+                              label: const Text('완료'),
+                            ),
+                    ),
+                  ],
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -601,7 +669,9 @@ class _StudyScreenState extends State<StudyScreen>
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  '${_cards.length}장의 카드를 모두 학습했습니다.',
+                  widget.srsMode
+                      ? '$_reviewedCount장의 카드를 복습했습니다.'
+                      : '${_cards.length}장의 카드를 모두 학습했습니다.',
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                         color: cs.onSurfaceVariant,
                       ),
@@ -645,6 +715,55 @@ class _StudyScreenState extends State<StudyScreen>
                 ),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+class _RatingButton extends StatelessWidget {
+  final int rating;
+  final String label;
+  final Color color;
+  final IconData icon;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  const _RatingButton({
+    required this.rating,
+    required this.label,
+    required this.color,
+    required this.icon,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: color.withValues(alpha: 0.1),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 24, color: color),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                ),
+              ),
+            ],
           ),
         ),
       ),

@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
-import '../main.dart' show themeNotifier;
+import '../main.dart' show themeNotifier, oauthHandledInMain;
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/library_prefs.dart';
@@ -13,10 +13,12 @@ import '../utils/snackbar_helper.dart';
 import '../widgets/session_list_item.dart';
 import '../utils/web_auth_stub.dart'
     if (dart.library.html) '../utils/web_auth.dart' as web_auth;
+import '../models/card_model.dart';
 import 'login_screen.dart';
-import 'main_screen.dart' show hideBottomNav;
+import 'main_screen.dart' show hideBottomNav, mainTabIndex;
 import 'manual_create_screen.dart';
 import 'review_screen.dart';
+import 'study_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -75,6 +77,12 @@ class _HomeScreenState extends State<HomeScreen> {
   // Polling for processing sessions
   Timer? _pollingTimer;
 
+  // SRS state
+  int _dueCards = 0;
+  int _streakDays = 0;
+  int _reviewsToday = 0;
+  bool _statsLoaded = false;
+
   final _templateOptions = [
     ('definition', '정의형', 'OO란? 형태의 Q&A', Icons.menu_book_rounded),
     ('cloze', '빈칸형', '핵심 키워드 빈칸 채우기', Icons.edit_note_rounded),
@@ -91,6 +99,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _handleOAuthCallback();
     _checkAuthState();
     _loadSessions();
+    _loadStudyStats();
   }
 
   @override
@@ -104,11 +113,21 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _handleOAuthCallback() async {
     if (!kIsWeb) return;
 
-    // URL fragment에서 토큰 추출
+    // main()에서 이미 처리한 경우 스낵바만 표시
+    if (oauthHandledInMain) {
+      oauthHandledInMain = false;
+      await _checkAuthState();
+      _loadSessions();
+      if (mounted) showSuccessSnackBar(context, '로그인되었습니다!');
+      return;
+    }
+
+    // 폴백: main()에서 못 잡은 경우
     final token = web_auth.extractTokenFromUrl();
     if (token != null) {
       await AuthService.setToken(token);
       await AuthService.linkDevice();
+      web_auth.clearUrlFragment();
       await _checkAuthState();
       _loadSessions();
       if (mounted) showSuccessSnackBar(context, '로그인되었습니다!');
@@ -118,6 +137,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // 에러 확인
     final error = web_auth.extractAuthErrorFromUrl();
     if (error != null && mounted) {
+      web_auth.clearUrlFragment();
       showErrorSnackBar(context, '로그인에 실패했습니다. 다시 시도해주세요.');
     }
   }
@@ -340,6 +360,51 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) setState(() => _sessionsError = true);
     } finally {
       if (mounted) setState(() => _sessionsLoading = false);
+    }
+  }
+
+  Future<void> _loadStudyStats() async {
+    try {
+      final stats = await ApiService.getStudyStats();
+      if (mounted) {
+        setState(() {
+          _dueCards = stats['due_cards'] as int? ?? 0;
+          _streakDays = stats['streak_days'] as int? ?? 0;
+          _reviewsToday = stats['reviews_today'] as int? ?? 0;
+          _statsLoaded = true;
+        });
+      }
+    } catch (_) {
+      // 통계 로드 실패 시 무시 (SRS 기능 없이도 앱 정상 작동)
+    }
+  }
+
+  Future<void> _startSrsStudy() async {
+    try {
+      final dueCardsData = await ApiService.getDueCards();
+      if (!mounted) return;
+
+      if (dueCardsData.isEmpty) {
+        showInfoSnackBar(context, '복습할 카드가 없습니다.');
+        return;
+      }
+
+      final cards = dueCardsData.map((data) => CardModel.fromJson(data)).toList();
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => StudyScreen(
+            cards: cards,
+            title: '오늘의 복습',
+            srsMode: true,
+          ),
+        ),
+      ).then((_) {
+        _loadStudyStats();
+        _loadSessions();
+      });
+    } catch (e) {
+      if (mounted) showErrorSnackBar(context, friendlyError(e));
     }
   }
 
@@ -755,162 +820,216 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
 
-            const SizedBox(height: 40),
+            // 오늘의 복습 배너
+            if (_statsLoaded && _dueCards > 0) ...[
+              const SizedBox(height: 28),
+              _buildDueCardsBanner(cs),
+            ],
 
-            // 1. PDF 업로드
-            Text(
-              '1. PDF 파일 선택',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 28),
 
-            InkWell(
-              onTap: _pickFile,
-              borderRadius: BorderRadius.circular(16),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: _hasFile ? cs.primary : cs.outlineVariant,
-                    width: _hasFile ? 2 : 1,
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                  color: _hasFile
-                      ? cs.primaryContainer.withValues(alpha: 0.3)
-                      : null,
-                ),
-                child: Column(
-                  children: [
-                    Icon(
-                      _hasFile
-                          ? Icons.check_circle_rounded
-                          : Icons.upload_file_rounded,
-                      size: 40,
-                      color: _hasFile ? cs.primary : cs.onSurfaceVariant,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      _selectedFileName ?? '탭하여 PDF를 선택하세요',
-                      style:
-                          Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                color: _hasFile
-                                    ? cs.primary
-                                    : cs.onSurfaceVariant,
-                                fontWeight:
-                                    _hasFile ? FontWeight.w600 : null,
-                              ),
-                    ),
-                    if (_hasFile && _selectedFileSize != null) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        _formatFileSize(_selectedFileSize!),
-                        style:
-                            Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: cs.onSurfaceVariant,
-                                ),
-                      ),
-                    ],
-                    if (!_hasFile) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        '강의자료, 교재, 필기노트 등',
-                        style:
-                            Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: cs.onSurfaceVariant,
-                                ),
-                      ),
-                    ],
-                  ],
+            // ── PDF 카드 (메인) ──
+            Card(
+              clipBehavior: Clip.antiAlias,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(
+                  color: _hasFile ? cs.primary : cs.outlineVariant.withValues(alpha: 0.5),
+                  width: _hasFile ? 1.5 : 1,
                 ),
               ),
-            ),
-
-            const SizedBox(height: 32),
-
-            // 2. 템플릿 선택
-            Text(
-              '2. 카드 유형 선택',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
-                  ?.copyWith(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 12),
-
-            for (final t in _templateOptions)
-              _buildTemplateOption(cs,
-                  value: t.$1, label: t.$2, desc: t.$3, icon: t.$4),
-
-            const SizedBox(height: 32),
-
-            // 에러
-            if (_error != null) ...[
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: cs.errorContainer,
-                  borderRadius: BorderRadius.circular(12),
-                ),
+              color: cs.surfaceContainerLow,
+              child: Padding(
+                padding: const EdgeInsets.all(20),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.error_outline, color: cs.error, size: 20),
-                        const SizedBox(width: 8),
+                        Container(
+                          width: 40, height: 40,
+                          decoration: BoxDecoration(
+                            color: cs.primaryContainer,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(Icons.picture_as_pdf_rounded, size: 22, color: cs.primary),
+                        ),
+                        const SizedBox(width: 12),
                         Expanded(
-                            child: Text(_error!,
-                                style:
-                                    TextStyle(color: cs.onErrorContainer))),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('PDF로 카드 만들기',
+                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                )),
+                              Text('강의자료, 교재를 올려보세요',
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: cs.onSurfaceVariant,
+                                )),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton.icon(
-                        onPressed: _generate,
-                        icon: Icon(Icons.refresh_rounded,
-                            size: 16, color: cs.error),
-                        label: Text('다시 시도',
-                            style: TextStyle(color: cs.error)),
-                        style: TextButton.styleFrom(
+                    const SizedBox(height: 16),
+
+                    // 파일 선택 영역
+                    InkWell(
+                      onTap: _pickFile,
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          color: _hasFile
+                              ? cs.primaryContainer.withValues(alpha: 0.3)
+                              : cs.outlineVariant.withValues(alpha: 0.15),
+                          border: Border.all(
+                            color: _hasFile ? cs.primary.withValues(alpha: 0.5) : cs.outlineVariant.withValues(alpha: 0.4),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              _hasFile ? Icons.check_circle_rounded : Icons.upload_file_rounded,
+                              size: 28,
+                              color: _hasFile ? cs.primary : cs.onSurfaceVariant.withValues(alpha: 0.6),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _selectedFileName ?? '탭하여 PDF를 선택하세요',
+                                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                      color: _hasFile ? cs.primary : cs.onSurfaceVariant,
+                                      fontWeight: _hasFile ? FontWeight.w600 : null,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  if (_hasFile && _selectedFileSize != null)
+                                    Text(
+                                      _formatFileSize(_selectedFileSize!),
+                                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                        color: cs.onSurfaceVariant,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            if (_hasFile)
+                              Icon(Icons.swap_horiz_rounded, size: 20, color: cs.onSurfaceVariant),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // 카드 유형 선택 (3개 가로 칩)
+                    Wrap(
+                      spacing: 8,
+                      children: _templateOptions.map((t) {
+                        final selected = _templateType == t.$1;
+                        return ChoiceChip(
+                          label: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(t.$4, size: 15,
+                                color: selected ? cs.onPrimaryContainer : cs.onSurfaceVariant),
+                              const SizedBox(width: 4),
+                              Text(t.$2, style: TextStyle(fontSize: 13)),
+                            ],
+                          ),
+                          selected: selected,
+                          onSelected: (_) => setState(() => _templateType = t.$1),
+                          visualDensity: VisualDensity.compact,
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                        );
+                      }).toList(),
+                    ),
+
+                    // 에러
+                    if (_error != null) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: cs.errorContainer,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.error_outline, color: cs.error, size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(child: Text(_error!, style: TextStyle(color: cs.onErrorContainer, fontSize: 13))),
+                          ],
+                        ),
+                      ),
+                    ],
+
+                    const SizedBox(height: 14),
+
+                    // 생성 버튼
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: _hasFile ? _generate : null,
+                        icon: const Icon(Icons.auto_awesome_rounded, size: 20),
+                        label: const Text('카드 만들기',
+                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                        style: FilledButton.styleFrom(
                           minimumSize: Size.zero,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 6),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
-            ],
-
-            // 생성 버튼
-            FilledButton.icon(
-              onPressed: _hasFile ? _generate : null,
-              icon: const Icon(Icons.auto_awesome_rounded),
-              label: const Text('카드 만들기',
-                  style:
-                      TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
             ),
 
             const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const ManualCreateScreen()),
-                ).then((_) => _loadSessions());
-              },
-              icon: const Icon(Icons.edit_note_rounded),
-              label: const Text('직접 카드 만들기',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+
+            // ── 하단 2열 카드 (카드셋 둘러보기 / 직접 만들기) ──
+            Row(
+              children: [
+                Expanded(
+                  child: _buildActionCard(
+                    cs,
+                    icon: Icons.explore_rounded,
+                    iconColor: cs.tertiary,
+                    iconBgColor: cs.tertiaryContainer,
+                    title: '카드셋 둘러보기',
+                    subtitle: '인기 자격증\n카드셋 탐색',
+                    onTap: () => mainTabIndex.value = 1,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildActionCard(
+                    cs,
+                    icon: Icons.edit_note_rounded,
+                    iconColor: cs.secondary,
+                    iconBgColor: cs.secondaryContainer,
+                    title: '직접 만들기',
+                    subtitle: '나만의\n카드 입력',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const ManualCreateScreen()),
+                      ).then((_) => _loadSessions());
+                    },
+                  ),
+                ),
+              ],
             ),
 
             const SizedBox(height: 40),
@@ -1091,6 +1210,66 @@ class _HomeScreenState extends State<HomeScreen> {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  Widget _buildDueCardsBanner(ColorScheme cs) {
+    return InkWell(
+      onTap: _startSrsStudy,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              cs.primary.withValues(alpha: 0.1),
+              cs.tertiary.withValues(alpha: 0.08),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: cs.primary.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: cs.primary.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Icon(Icons.replay_rounded, color: cs.primary, size: 24),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '오늘 복습할 카드 $_dueCards장',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _streakDays > 0
+                        ? '$_streakDays일 연속 학습 중'
+                        : _reviewsToday > 0
+                            ? '오늘 $_reviewsToday장 복습 완료'
+                            : '탭하여 복습 시작',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: cs.onSurfaceVariant,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.arrow_forward_ios_rounded, size: 16, color: cs.onSurfaceVariant),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildLoginButton(ColorScheme cs) {
@@ -1296,56 +1475,50 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildTemplateOption(
+  Widget _buildActionCard(
     ColorScheme cs, {
-    required String value,
-    required String label,
-    required String desc,
     required IconData icon,
+    required Color iconColor,
+    required Color iconBgColor,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
   }) {
-    final selected = _templateType == value;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.5)),
+      ),
+      color: cs.surfaceContainerLow,
       child: InkWell(
-        onTap: () => setState(() => _templateType = value),
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          decoration: BoxDecoration(
-            border: Border.all(
-              color: selected ? cs.primary : cs.outlineVariant,
-              width: selected ? 2 : 1,
-            ),
-            borderRadius: BorderRadius.circular(12),
-            color: selected
-                ? cs.primaryContainer.withValues(alpha: 0.3)
-                : null,
-          ),
-          child: Row(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(icon,
-                  color: selected ? cs.primary : cs.onSurfaceVariant,
-                  size: 24),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(label,
-                        style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: selected ? cs.primary : null)),
-                    Text(desc,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(color: cs.onSurfaceVariant)),
-                  ],
+              Container(
+                width: 36, height: 36,
+                decoration: BoxDecoration(
+                  color: iconBgColor,
+                  borderRadius: BorderRadius.circular(9),
                 ),
+                child: Icon(icon, size: 20, color: iconColor),
               ),
-              if (selected)
-                Icon(Icons.check_circle_rounded,
-                    color: cs.primary, size: 22),
+              const SizedBox(height: 12),
+              Text(title,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                )),
+              const SizedBox(height: 4),
+              Text(subtitle,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: cs.onSurfaceVariant,
+                  height: 1.3,
+                )),
             ],
           ),
         ),
