@@ -1326,6 +1326,7 @@ def _build_session_response(session: SessionModel) -> dict:
         "progress": session.progress or 0,
         "total_chunks": session.total_chunks or 0,
         "completed_chunks": session.completed_chunks or 0,
+        "card_count": len(cards),
         "created_at": session.created_at.isoformat() + "Z",
         "cards": cards,
         "stats": stats,
