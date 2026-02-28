@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/auth_service.dart';
-import 'explore_screen.dart';
 import 'home_screen.dart';
 import 'library_screen.dart';
 import 'login_screen.dart';
@@ -29,11 +28,6 @@ Widget buildAppBottomNav(BuildContext context, {int selectedIndex = 0}) {
         icon: Icon(Icons.home_outlined),
         selectedIcon: Icon(Icons.home_rounded),
         label: '홈',
-      ),
-      NavigationDestination(
-        icon: Icon(Icons.explore_outlined),
-        selectedIcon: Icon(Icons.explore_rounded),
-        label: '탐색',
       ),
       NavigationDestination(
         icon: Icon(Icons.folder_outlined),
@@ -112,7 +106,6 @@ class _MainScreenState extends State<MainScreen> {
             index: mainTabIndex.value,
             children: [
               const HomeScreen(),
-              const ExploreScreen(),
               _isLoggedIn
                   ? const LibraryScreen()
                   : _buildLoginRequired(cs),
@@ -133,11 +126,6 @@ class _MainScreenState extends State<MainScreen> {
                       icon: Icon(Icons.home_outlined),
                       selectedIcon: Icon(Icons.home_rounded),
                       label: '홈',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(Icons.explore_outlined),
-                      selectedIcon: Icon(Icons.explore_rounded),
-                      label: '탐색',
                     ),
                     NavigationDestination(
                       icon: Icon(Icons.folder_outlined),

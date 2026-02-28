@@ -7,8 +7,25 @@ from .config import settings
 
 logger = logging.getLogger(__name__)
 
-# Claude CLI는 Node.js 프로세스 — 동시 실행 수 제한 (메모리 보호)
-_cli_semaphore = asyncio.Semaphore(3)
+# 글로벌 Semaphore (서버 전체 동시 CLI 수)
+MAX_CONCURRENT_CLI = settings.MAX_CONCURRENT_CLI
+_cli_semaphore = asyncio.Semaphore(MAX_CONCURRENT_CLI)
+
+# 세션별 Semaphore (한 세션이 글로벌 슬롯 독점 방지)
+MAX_CLI_PER_SESSION = settings.MAX_CLI_PER_SESSION
+_session_semaphores: dict[str, asyncio.Semaphore] = {}
+
+
+def _get_session_semaphore(session_id: str) -> asyncio.Semaphore:
+    if session_id not in _session_semaphores:
+        _session_semaphores[session_id] = asyncio.Semaphore(MAX_CLI_PER_SESSION)
+    return _session_semaphores[session_id]
+
+
+def release_session_semaphore(session_id: str):
+    """세션 완료 후 세션 semaphore 정리."""
+    _session_semaphores.pop(session_id, None)
+
 
 MEMORY_WARN_MB = 150  # 가용 메모리가 이 이하면 Slack 경고
 _memory_alert_sent = False  # 중복 알림 방지
@@ -47,11 +64,12 @@ async def run_claude(
     user_prompt: str,
     model: str | None = None,
     tools: str = "",
+    session_id: str | None = None,
 ) -> str:
     """Claude Code CLI `-p` 모드로 AI 호출. JSON 출력 강제."""
     import json
 
-    cmd = ["claude", "-p", "--output-format", "json"]
+    cmd = ["claude", "-p", "--output-format", "json", "--permission-mode", "default"]
 
     if system_prompt:
         cmd += ["--system-prompt", system_prompt]
@@ -62,15 +80,25 @@ async def run_claude(
     if tools:
         cmd += ["--tools", tools]
 
-    # 중첩 실행 차단 우회: CLAUDECODE 키만 제거
+    # 중첩 실행 차단 우회 + plan mode 전파 방지
+    # CLAUDECODE 제거: 중첩 실행 차단 우회
     # CLAUDE_CODE_OAUTH_TOKEN 등 인증 관련 env는 유지
     env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
 
-    logger.info("CLI 실행 대기 (model=%s, prompt=%d chars)", model or "default", len(user_prompt))
+    logger.info("CLI 실행 대기 (model=%s, prompt=%d chars, session=%s)", model or "default", len(user_prompt), session_id or "none")
 
-    async with _cli_semaphore:
-        await _warn_if_low_memory()
-        raw = await _run_cli(cmd, env, user_prompt)
+    # 이중 Semaphore: 세션별 제한 → 글로벌 제한
+    session_sem = _get_session_semaphore(session_id) if session_id else None
+
+    if session_sem:
+        await session_sem.acquire()
+    try:
+        async with _cli_semaphore:
+            await _warn_if_low_memory()
+            raw = await _run_cli(cmd, env, user_prompt)
+    finally:
+        if session_sem:
+            session_sem.release()
 
     logger.info("CLI 응답 수신: %d chars", len(raw))
 

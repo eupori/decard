@@ -285,23 +285,24 @@ class _StudyScreenState extends State<StudyScreen>
 
   TextStyle _responsiveTextStyle(int length) {
     final base = Theme.of(context).textTheme;
+    final wide = MediaQuery.of(context).size.width > 600;
     if (length <= 20) {
-      return base.headlineSmall!.copyWith(
+      return (wide ? base.headlineMedium! : base.headlineSmall!).copyWith(
         height: 1.6,
         fontWeight: FontWeight.w600,
       );
     } else if (length <= 80) {
-      return base.titleLarge!.copyWith(
+      return (wide ? base.headlineSmall! : base.titleLarge!).copyWith(
         height: 1.6,
         fontWeight: FontWeight.w600,
       );
     } else if (length <= 200) {
-      return base.titleMedium!.copyWith(
+      return (wide ? base.titleLarge! : base.titleMedium!).copyWith(
         height: 1.6,
         fontWeight: FontWeight.w600,
       );
     } else {
-      return base.bodyLarge!.copyWith(
+      return (wide ? base.titleMedium! : base.bodyLarge!).copyWith(
         height: 1.7,
         fontWeight: FontWeight.w500,
       );
@@ -348,16 +349,18 @@ class _StudyScreenState extends State<StudyScreen>
   }
 
   Widget _buildBackContent(CardModel card, ColorScheme cs) {
-    final formatted = _formatAnswer(card.back);
+    final narrow = MediaQuery.of(context).size.width <= 400;
+    final formatted = narrow ? _formatAnswer(card.back).replaceAll('\u2060', '') : _formatAnswer(card.back);
     final isLong = formatted.length > 40 || formatted.contains('\n');
     final plainLength = formatted.replaceAll('\u2060', '').length;
+    final wide = MediaQuery.of(context).size.width > 600;
     final style = plainLength > 200
-        ? Theme.of(context).textTheme.bodyLarge?.copyWith(
+        ? (wide ? Theme.of(context).textTheme.titleMedium : Theme.of(context).textTheme.bodyLarge)?.copyWith(
               height: 1.7,
               fontWeight: FontWeight.w500,
               wordSpacing: 1.2,
             )
-        : Theme.of(context).textTheme.titleLarge?.copyWith(
+        : (wide ? Theme.of(context).textTheme.headlineSmall : Theme.of(context).textTheme.titleLarge)?.copyWith(
               height: 1.8,
               fontWeight: FontWeight.w500,
               wordSpacing: 1.2,

@@ -8,7 +8,7 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .models import UserModel, SessionModel, FolderModel
+from .models import UserModel, SessionModel, FolderModel, CardReviewModel
 
 logger = logging.getLogger(__name__)
 
@@ -117,8 +117,18 @@ def link_device_sessions(db: Session, user: UserModel, device_id: str):
         f.device_id = f"migrated_{user.id}"
     db.commit()
 
-    logger.info("Linked %d sessions, %d folders from device %s to user %s",
-                len(sessions), len(folders), device_id, user.id)
+    # CardReview도 마이그레이션
+    reviews = db.query(CardReviewModel).filter(
+        CardReviewModel.device_id == device_id,
+        CardReviewModel.user_id.is_(None),
+    ).all()
+    for r in reviews:
+        r.user_id = user.id
+        r.device_id = f"migrated_{user.id}"
+    db.commit()
+
+    logger.info("Linked %d sessions, %d folders, %d reviews from device %s to user %s",
+                len(sessions), len(folders), len(reviews), device_id, user.id)
 
 
 # ──────────────────────────────────────

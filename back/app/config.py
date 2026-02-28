@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     # Frontend
     FRONTEND_URL: str = "http://localhost:8080"
 
+    # Concurrency
+    MAX_CONCURRENT_CLI: int = 3
+    MAX_CLI_PER_SESSION: int = 2
+    MAX_CONCURRENT_SESSIONS: int = 5
+    SESSION_TIMEOUT_MINUTES: int = 15
+
     model_config = {"env_file": ".env"}
 
 

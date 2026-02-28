@@ -39,6 +39,7 @@ def create_tables():
     _migrate_source_type()
     _migrate_card_reviews()
     _migrate_public_cardsets()
+    _migrate_session_progress()
 
 
 def _migrate_device_id():
@@ -109,3 +110,18 @@ def _migrate_public_cardsets():
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_public_cardsets_category ON public_cardsets (category)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_public_cardsets_status ON public_cardsets (status)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_public_cards_cardset_id ON public_cards (cardset_id)"))
+
+
+def _migrate_session_progress():
+    """Add error_message, progress, total_chunks, completed_chunks to sessions."""
+    insp = inspect(engine)
+    columns = [c["name"] for c in insp.get_columns("sessions")]
+    with engine.begin() as conn:
+        if "error_message" not in columns:
+            conn.execute(text("ALTER TABLE sessions ADD COLUMN error_message VARCHAR"))
+        if "progress" not in columns:
+            conn.execute(text("ALTER TABLE sessions ADD COLUMN progress INTEGER DEFAULT 0"))
+        if "total_chunks" not in columns:
+            conn.execute(text("ALTER TABLE sessions ADD COLUMN total_chunks INTEGER DEFAULT 0"))
+        if "completed_chunks" not in columns:
+            conn.execute(text("ALTER TABLE sessions ADD COLUMN completed_chunks INTEGER DEFAULT 0"))

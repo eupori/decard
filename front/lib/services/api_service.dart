@@ -78,59 +78,86 @@ class ApiService {
     return SessionModel.fromJson(jsonDecode(response.body));
   }
 
-  /// PDF 업로드 + 카드 생성 (업로드 진행률 콜백 지원)
+  /// PDF 업로드 + 카드 생성 (업로드 진행률 콜백 지원, 429 자동 재시도)
   static Future<SessionModel> generateWithProgress({
     Uint8List? bytes,
     String? filePath,
     required String fileName,
     required String templateType,
     required void Function(double progress) onProgress,
+    void Function(int retryAfter)? onServerBusy,
   }) async {
-    final headers = await _headers();
+    const maxRetries = 3;
 
-    final formData = dio.FormData.fromMap({
-      'template_type': templateType,
-      'file': filePath != null
-          ? await dio.MultipartFile.fromFile(filePath, filename: fileName)
-          : dio.MultipartFile.fromBytes(bytes!, filename: fileName),
-    });
+    for (int attempt = 0; attempt < maxRetries; attempt++) {
+      final headers = await _headers();
 
-    final client = dio.Dio(dio.BaseOptions(
-      connectTimeout: const Duration(seconds: 30),
-      sendTimeout: const Duration(seconds: 600),
-      receiveTimeout: const Duration(seconds: 600),
-    ));
+      final formData = dio.FormData.fromMap({
+        'template_type': templateType,
+        'file': filePath != null
+            ? await dio.MultipartFile.fromFile(filePath, filename: fileName)
+            : dio.MultipartFile.fromBytes(bytes!, filename: fileName),
+      });
 
-    try {
-      final response = await client.post(
-        ApiConfig.generateUrl,
-        data: formData,
-        options: dio.Options(headers: headers),
-        onSendProgress: (sent, total) {
-          if (total > 0) onProgress(sent / total);
-        },
-      );
+      final client = dio.Dio(dio.BaseOptions(
+        connectTimeout: const Duration(seconds: 30),
+        sendTimeout: const Duration(seconds: 600),
+        receiveTimeout: const Duration(seconds: 600),
+      ));
 
-      if (response.statusCode != 200) {
-        final detail = response.data is Map
-            ? response.data['detail'] as String?
-            : null;
-        throw ApiException(detail ?? '카드 생성에 실패했습니다.', response.statusCode!);
+      try {
+        final response = await client.post(
+          ApiConfig.generateUrl,
+          data: formData,
+          options: dio.Options(headers: headers),
+          onSendProgress: (sent, total) {
+            if (total > 0) onProgress(sent / total);
+          },
+        );
+
+        if (response.statusCode != 200) {
+          final detail = response.data is Map
+              ? response.data['detail'] as String?
+              : null;
+          throw ApiException(detail ?? '카드 생성에 실패했습니다.', response.statusCode!);
+        }
+
+        return SessionModel.fromJson(response.data as Map<String, dynamic>);
+      } on dio.DioException catch (e) {
+        if (e.response?.statusCode == 429 && attempt < maxRetries - 1) {
+          final data = e.response?.data;
+          int retryAfter = 30;
+          if (data is Map) {
+            final detail = data['detail'];
+            if (detail is Map) {
+              retryAfter = detail['retry_after_seconds'] as int? ?? 30;
+            }
+          }
+          onServerBusy?.call(retryAfter);
+          await Future.delayed(Duration(seconds: retryAfter));
+          continue;
+        }
+        if (e.response != null) {
+          final data = e.response?.data;
+          String? detail;
+          if (data is Map) {
+            // detail이 문자열이면 그대로, Map이면 error 필드 사용
+            final d = data['detail'];
+            if (d is String) {
+              detail = d;
+            } else if (d is Map) {
+              detail = d['error'] as String?;
+            }
+          }
+          throw ApiException(
+              detail ?? '카드 생성에 실패했습니다.', e.response?.statusCode ?? 500);
+        }
+        throw ApiException('서버에 연결할 수 없습니다.', 0);
+      } finally {
+        client.close();
       }
-
-      return SessionModel.fromJson(response.data as Map<String, dynamic>);
-    } on dio.DioException catch (e) {
-      if (e.response != null) {
-        final data = e.response?.data;
-        final detail =
-            data is Map ? data['detail'] as String? : null;
-        throw ApiException(
-            detail ?? '카드 생성에 실패했습니다.', e.response?.statusCode ?? 500);
-      }
-      throw ApiException('서버에 연결할 수 없습니다.', 0);
-    } finally {
-      client.close();
     }
+    throw ApiException('서버가 바쁩니다. 잠시 후 다시 시도해주세요.', 429);
   }
 
   /// 세션 조회

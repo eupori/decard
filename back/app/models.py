@@ -53,6 +53,10 @@ class SessionModel(Base):
     display_name = Column(String, nullable=True)
     source_type = Column(String, default="pdf")  # pdf / manual / csv / xlsx
     status = Column(String, default="processing")  # processing / completed / failed
+    error_message = Column(String, nullable=True)      # 실패 사유
+    progress = Column(Integer, default=0)               # 0~100
+    total_chunks = Column(Integer, default=0)            # 전체 청크 수
+    completed_chunks = Column(Integer, default=0)        # 완료된 청크 수
     created_at = Column(DateTime, default=datetime.utcnow)
 
     cards = relationship("CardModel", back_populates="session", cascade="all, delete-orphan")

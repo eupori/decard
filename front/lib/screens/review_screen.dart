@@ -9,6 +9,7 @@ import '../widgets/save_to_library_dialog.dart';
 import 'main_screen.dart' show buildAppBottomNav;
 import 'study_screen.dart';
 import 'subjective_study_screen.dart';
+import 'exam_screen.dart';
 
 class ReviewScreen extends StatefulWidget {
   final SessionModel session;
@@ -104,6 +105,143 @@ class _ReviewScreenState extends State<ReviewScreen> {
     }
   }
 
+  void _startExam() {
+    final studyCards = _cards.where((c) => c.isAccepted).toList();
+    if (studyCards.length < 2) {
+      showInfoSnackBar(context, '시험을 보려면 채택된 카드가 최소 2장 필요합니다.');
+      return;
+    }
+    _showExamSettingsSheet(studyCards);
+  }
+
+  void _showExamSettingsSheet(List<CardModel> studyCards) {
+    int selectedCount = studyCards.length <= 10
+        ? studyCards.length
+        : 10;
+    String selectedType = 'mixed';
+    final canObjective = studyCards.length >= 4;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40, height: 4,
+                      decoration: BoxDecoration(
+                        color: Theme.of(ctx).colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Text('시험 설정',
+                    style: Theme.of(ctx).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 20),
+
+                  // 문제 수
+                  Text('문제 수', style: Theme.of(ctx).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      if (studyCards.length > 10)
+                        ChoiceChip(
+                          label: const Text('10문제'),
+                          selected: selectedCount == 10,
+                          onSelected: (_) => setSheetState(() => selectedCount = 10),
+                        ),
+                      if (studyCards.length > 20)
+                        ChoiceChip(
+                          label: const Text('20문제'),
+                          selected: selectedCount == 20,
+                          onSelected: (_) => setSheetState(() => selectedCount = 20),
+                        ),
+                      ChoiceChip(
+                        label: Text('전체 (${studyCards.length}문제)'),
+                        selected: selectedCount == studyCards.length,
+                        onSelected: (_) => setSheetState(() => selectedCount = studyCards.length),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+
+                  // 유형
+                  Text('문제 유형', style: Theme.of(ctx).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      ChoiceChip(
+                        label: const Text('혼합'),
+                        selected: selectedType == 'mixed',
+                        onSelected: (_) => setSheetState(() => selectedType = 'mixed'),
+                      ),
+                      ChoiceChip(
+                        label: const Text('주관식'),
+                        selected: selectedType == 'subjective',
+                        onSelected: (_) => setSheetState(() => selectedType = 'subjective'),
+                      ),
+                      ChoiceChip(
+                        label: const Text('객관식'),
+                        selected: selectedType == 'objective',
+                        onSelected: canObjective
+                            ? (_) => setSheetState(() => selectedType = 'objective')
+                            : null,
+                      ),
+                    ],
+                  ),
+                  if (!canObjective)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text('객관식은 4장 이상 필요합니다',
+                        style: TextStyle(fontSize: 12, color: Theme.of(ctx).colorScheme.onSurfaceVariant)),
+                    ),
+                  const SizedBox(height: 24),
+
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ExamScreen(
+                              cards: studyCards,
+                              title: widget.session.displayName ??
+                                  widget.session.filename.replaceAll('.pdf', ''),
+                              sessionId: widget.session.id,
+                              examType: selectedType,
+                              questionCount: selectedCount,
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.quiz_rounded, size: 18),
+                      label: Text('시험 시작 ($selectedCount문제)'),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   void _startStudy() {
     final studyCards = _cards.where((c) => c.isAccepted).toList();
     if (studyCards.isEmpty) {
@@ -153,6 +291,11 @@ class _ReviewScreenState extends State<ReviewScreen> {
             onPressed: _startStudy,
             icon: const Icon(Icons.school_rounded),
             tooltip: '학습하기',
+          ),
+          IconButton(
+            onPressed: _startExam,
+            icon: const Icon(Icons.quiz_rounded),
+            tooltip: '시험보기',
           ),
         ],
       ),
@@ -307,32 +450,45 @@ class _ReviewScreenState extends State<ReviewScreen> {
                   ),
           ),
           const SizedBox(height: 8),
+          if (_pendingCount > 0)
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _acceptAll,
+                icon: const Icon(Icons.check_circle_outline, size: 18),
+                label: Text('전체 채택 ($_pendingCount장)'),
+              ),
+            )
+          else if (_acceptedCount > 0 || _rejectedCount > 0)
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _resetAll,
+                icon: const Icon(Icons.undo_rounded, size: 18),
+                label: const Text('전체 해제'),
+              ),
+            ),
+          const SizedBox(height: 8),
           Row(
             children: [
-              if (_pendingCount > 0) ...[
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _acceptAll,
-                    icon: const Icon(Icons.check_circle_outline, size: 18),
-                    label: Text('전체 채택 ($_pendingCount장)'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-              ] else if (_acceptedCount > 0 || _rejectedCount > 0) ...[
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _resetAll,
-                    icon: const Icon(Icons.undo_rounded, size: 18),
-                    label: const Text('전체 해제'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-              ],
               Expanded(
                 child: FilledButton.icon(
                   onPressed: _startStudy,
                   icon: const Icon(Icons.school_rounded, size: 18),
-                  label: Text('학습하기 ($_acceptedCount장)'),
+                  label: Text('학습 ($_acceptedCount장)'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _startExam,
+                  icon: const Icon(Icons.quiz_rounded, size: 18),
+                  label: const Text('시험'),
+                  style: FilledButton.styleFrom(
+                    minimumSize: Size.zero,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    backgroundColor: Theme.of(context).colorScheme.tertiary,
+                  ),
                 ),
               ),
             ],

@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from .auth import get_device_id, get_owner_filter, get_owner_filter_for_folder, get_owner_id
+from .claude_cli import release_session_semaphore
 from .config import settings
 from .database import get_db, SessionLocal
 from .models import (
@@ -64,6 +65,21 @@ async def generate(
 
     t3 = time.time()
 
+    # 동시 처리 세션 수 제한
+    processing_count = db.query(SessionModel).filter(
+        SessionModel.status == "processing"
+    ).count()
+    if processing_count >= settings.MAX_CONCURRENT_SESSIONS:
+        raise HTTPException(
+            429,
+            detail={
+                "error": "서버가 바쁩니다. 잠시 후 다시 시도해주세요.",
+                "processing_count": processing_count,
+                "max_concurrent": settings.MAX_CONCURRENT_SESSIONS,
+                "retry_after_seconds": 30,
+            },
+        )
+
     # 세션 생성 (즉시 반환 — 텍스트 추출은 백그라운드에서)
     owner = get_owner_id(request)
     session = SessionModel(
@@ -109,8 +125,9 @@ def list_sessions(request: Request, db: Session = Depends(get_db)):
         .limit(50)
         .all()
     )
-    return [
-        {
+    result = []
+    for s in sessions:
+        item = {
             "id": s.id,
             "filename": s.filename,
             "page_count": s.page_count,
@@ -120,10 +137,15 @@ def list_sessions(request: Request, db: Session = Depends(get_db)):
             "folder_id": s.folder_id,
             "display_name": s.display_name,
             "source_type": s.source_type or "pdf",
+            "progress": s.progress or 0,
+            "total_chunks": s.total_chunks or 0,
+            "completed_chunks": s.completed_chunks or 0,
             "created_at": s.created_at.isoformat() + "Z",
         }
-        for s in sessions
-    ]
+        if s.error_message:
+            item["error_message"] = s.error_message
+        result.append(item)
+    return result
 
 
 # ──────────────────────────────────────
@@ -430,8 +452,9 @@ def list_folder_sessions(
         .order_by(SessionModel.created_at.desc())
         .all()
     )
-    return [
-        {
+    result = []
+    for s in sessions:
+        item = {
             "id": s.id,
             "filename": s.filename,
             "page_count": s.page_count,
@@ -441,10 +464,15 @@ def list_folder_sessions(
             "folder_id": s.folder_id,
             "display_name": s.display_name,
             "source_type": s.source_type or "pdf",
+            "progress": s.progress or 0,
+            "total_chunks": s.total_chunks or 0,
+            "completed_chunks": s.completed_chunks or 0,
             "created_at": s.created_at.isoformat() + "Z",
         }
-        for s in sessions
-    ]
+        if s.error_message:
+            item["error_message"] = s.error_message
+        result.append(item)
+    return result
 
 
 # ──────────────────────────────────────
@@ -706,6 +734,28 @@ async def _generate_in_background(
 ) -> None:
     """Request 스코프 밖에서 별도 DB 세션으로 텍스트 추출 + 카드 생성."""
     db = SessionLocal()
+
+    async def _update_progress(completed_chunks: int, total_chunks: int, phase: str):
+        """청크 완료 시마다 DB에 진행률 업데이트."""
+        try:
+            session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+            if not session:
+                logger.warning("진행률 업데이트: 세션 없음 session=%s (이미 삭제?)", session_id)
+                return
+            session.completed_chunks = completed_chunks
+            session.total_chunks = total_chunks
+            if phase == "generating":
+                session.progress = int(completed_chunks / max(total_chunks, 1) * 80)
+            elif phase == "reviewing":
+                session.progress = 85
+            elif phase == "done":
+                session.progress = 100
+            db.commit()
+            logger.info("진행률 업데이트: session=%s, phase=%s, %d/%d, progress=%d%%",
+                        session_id, phase, completed_chunks, total_chunks, session.progress)
+        except Exception as e:
+            logger.error("진행률 업데이트 실패: session=%s, error=%s: %s", session_id, type(e).__name__, e)
+
     try:
         # 텍스트 추출 (백그라운드에서 실행)
         pages = extract_text_from_pdf(pdf_content)
@@ -722,7 +772,11 @@ async def _generate_in_background(
         session.page_count = len(pages)
         db.commit()
 
-        cards_data = await generate_cards(pages, template_type)
+        cards_data = await generate_cards(
+            pages, template_type,
+            session_id=session_id,
+            on_progress=_update_progress,
+        )
 
         for card_data in cards_data:
             status = card_data.pop("status", "pending")
@@ -730,20 +784,38 @@ async def _generate_in_background(
             db.add(CardModel(session_id=session.id, status=status, **card_data))
 
         session.status = "completed"
+        session.progress = 100
         db.commit()
         logger.info("백그라운드 생성 완료: session=%s, cards=%d", session_id, len(cards_data))
     except Exception as e:
-        logger.exception("백그라운드 카드 생성 실패: session=%s", session_id)
-        session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
-        if session:
-            session.status = "failed"
-            db.commit()
+        logger.exception("백그라운드 카드 생성 실패: session=%s, error=%s: %s", session_id, type(e).__name__, e)
+        try:
+            session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
+            if session:
+                session.status = "failed"
+                # 사용자에게 보여줄 에러 메시지 — 기술적 세부사항은 줄이고 사유 위주
+                err_str = str(e)
+                if "타임아웃" in err_str or "timeout" in err_str.lower():
+                    session.error_message = "AI 처리 시간이 초과되었습니다. 더 짧은 PDF로 시도해주세요."
+                elif "빈 응답" in err_str:
+                    session.error_message = "AI가 응답하지 않았습니다. 잠시 후 다시 시도해주세요."
+                elif "텍스트를 추출" in err_str:
+                    session.error_message = "PDF에서 텍스트를 읽을 수 없습니다. 스캔된 PDF는 지원하지 않습니다."
+                elif "페이지 수 초과" in err_str:
+                    session.error_message = err_str
+                else:
+                    session.error_message = f"카드 생성 중 오류가 발생했습니다: {err_str[:200]}"
+                db.commit()
+                logger.info("세션 실패 저장 완료: session=%s, error_message=%s", session_id, session.error_message)
+        except Exception as db_err:
+            logger.error("세션 실패 상태 업데이트 불가: session=%s, db_error=%s: %s", session_id, type(db_err).__name__, db_err)
         from .slack import send_slack_alert
         await send_slack_alert(
             "카드 생성 실패",
             f"session: `{session_id}`\nerror: {type(e).__name__}: {e}",
         )
     finally:
+        release_session_semaphore(session_id)
         db.close()
 
 
@@ -1242,7 +1314,7 @@ def _build_session_response(session: SessionModel) -> dict:
         "rejected": sum(1 for c in cards if c["status"] == "rejected"),
         "pending": sum(1 for c in cards if c["status"] == "pending"),
     }
-    return {
+    resp = {
         "id": session.id,
         "filename": session.filename,
         "page_count": session.page_count,
@@ -1251,7 +1323,13 @@ def _build_session_response(session: SessionModel) -> dict:
         "folder_id": session.folder_id,
         "display_name": session.display_name,
         "source_type": session.source_type or "pdf",
+        "progress": session.progress or 0,
+        "total_chunks": session.total_chunks or 0,
+        "completed_chunks": session.completed_chunks or 0,
         "created_at": session.created_at.isoformat() + "Z",
         "cards": cards,
         "stats": stats,
     }
+    if session.error_message:
+        resp["error_message"] = session.error_message
+    return resp

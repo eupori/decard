@@ -33,6 +33,10 @@ class SessionModel {
   final String? displayName;
   final String createdAt;
   final String sourceType;
+  final String? errorMessage;
+  final int progress;
+  final int totalChunks;
+  final int completedChunks;
   final List<CardModel> cards;
   final SessionStats stats;
 
@@ -45,6 +49,10 @@ class SessionModel {
     this.folderId,
     this.displayName,
     this.sourceType = 'pdf',
+    this.errorMessage,
+    this.progress = 0,
+    this.totalChunks = 0,
+    this.completedChunks = 0,
     required this.createdAt,
     required this.cards,
     required this.stats,
@@ -60,6 +68,10 @@ class SessionModel {
       folderId: json['folder_id'] as String?,
       displayName: json['display_name'] as String?,
       sourceType: json['source_type'] as String? ?? 'pdf',
+      errorMessage: json['error_message'] as String?,
+      progress: json['progress'] as int? ?? 0,
+      totalChunks: json['total_chunks'] as int? ?? 0,
+      completedChunks: json['completed_chunks'] as int? ?? 0,
       createdAt: json['created_at'] as String,
       cards: (json['cards'] as List<dynamic>)
           .map((c) => CardModel.fromJson(c as Map<String, dynamic>))

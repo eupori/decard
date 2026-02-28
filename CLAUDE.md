@@ -191,8 +191,9 @@ PDF 업로드 (dio, 진행률 표시)
   → asyncio.create_task로 백그라운드 실행:
     → pdfplumber 텍스트 추출 (페이지별)
     → 5페이지씩 청크 분할 (200자 미만 청크는 이전 청크에 병합)
-    → asyncio.gather로 병렬 Claude CLI 호출 (Semaphore=3)
+    → asyncio.gather로 병렬 Claude CLI 호출 (Semaphore=3, --permission-mode default)
       → 4단계 사고 프롬프트: 내용 분석 → 출제 포인트 → 카드 작성 → 채택 판단
+      → Plan Mode 방지: 프롬프트에 "계획 금지, JSON만 출력" 명시
       → 필기/메모도 보충 자료로 적극 분석 (낙서만 무시)
       → --output-format json 강제, 실패 시 3회 재시도 (2/5/10초 백오프)
       → recommend 가중치 판단 (출제가능성/학습효율/핵심도/독립성)
@@ -278,6 +279,8 @@ static const String baseUrl = String.fromEnvironment(
 10. **Flutter web_auth**: `package:web` 사용 (dart:html deprecated). `history.replaceState` 대신 `location.hash = ''` 사용 (Flutter 히스토리 충돌 방지)
 11. **백그라운드 태스크와 --reload**: `uvicorn --reload`가 코드 변경 감지 시 워커를 재시작하면 `asyncio.create_task`로 생성된 백그라운드 태스크가 소멸됨. 프로덕션에서는 `--reload` 없으므로 문제없음. 로컬 테스트 중 코드 수정 시 processing 세션이 stuck될 수 있음
 12. **UTC 시간**: models.py에서 `datetime.utcnow`로 저장. API 응답에서 `isoformat() + "Z"` 필수 (프론트 DateTime.tryParse가 Z를 보고 UTC로 파싱)
+13. **Claude CLI Plan Mode 방지**: `~/.claude/settings.json`에 `"defaultMode": "plan"`이 설정되면 `claude -p` 호출에도 plan mode가 전파됨. `claude_cli.py`에서 `--permission-mode default` 플래그로 강제 차단. 모든 프롬프트에 "계획 작성 금지, JSON 배열만 출력, 첫 글자 `[`" 명시
+14. **배치 테스트**: `test_pdfs/batch_test.py` 사용. 서버는 `--reload` 없이 실행. 동시 배치 2개 이하 권장 (Semaphore=3 병목)
 
 ---
 

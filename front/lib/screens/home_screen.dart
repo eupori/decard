@@ -53,6 +53,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Timer? _progressTimer;
   double _progress = 0.0;
   int _elapsedSeconds = 0;
+  int _serverProgress = 0;  // 서버에서 받은 실제 진행률 (0~100)
+  int _serverTotalChunks = 0;
+  int _serverCompletedChunks = 0;
 
   final _tips = [
     'PDF 꼼꼼히 읽는 중...',
@@ -194,6 +197,9 @@ class _HomeScreenState extends State<HomeScreen> {
   void _startWaitingHere() {
     _elapsedSeconds = 0;
     _progress = 0.0;
+    _serverProgress = 0;
+    _serverTotalChunks = 0;
+    _serverCompletedChunks = 0;
 
     setState(() => _waitingHere = true);
 
@@ -206,20 +212,28 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     });
 
-    // 프로그레스 바 (1초마다 업데이트, 점근적으로 99%까지)
+    // 프로그레스 바 (1초마다 업데이트 — 서버 진행률 우선, 없으면 점근적)
     _progressTimer?.cancel();
     _progressTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _waitingHere) {
         _elapsedSeconds++;
         setState(() {
-          // 예상 시간까지 선형으로 80%까지, 이후 점근적으로 99%까지
-          final linear = (_elapsedSeconds / _estimatedSeconds).clamp(0.0, 0.8);
-          if (linear < 0.8) {
-            _progress = linear;
+          // 서버 진행률이 있으면 그걸 사용 (0~100 → 0.0~1.0)
+          if (_serverProgress > 0) {
+            final serverP = _serverProgress / 100.0;
+            // 서버 진행률과 현재 표시값 중 더 큰 쪽 사용 (역행 방지)
+            _progress = _progress > serverP ? _progress : serverP;
+            // 100%가 아니면 99%까지만
+            if (_progress >= 1.0 && _serverProgress < 100) _progress = 0.99;
           } else {
-            // 80% 이후: 느리게 99%까지 접근 (절대 멈추지 않음)
-            final overtime = _elapsedSeconds - (_estimatedSeconds * 0.8).toInt();
-            _progress = 0.8 + 0.19 * (1 - 1 / (1 + overtime / 60.0));
+            // 서버 진행률 없을 때: 기존 점근적 방식
+            final linear = (_elapsedSeconds / _estimatedSeconds).clamp(0.0, 0.8);
+            if (linear < 0.8) {
+              _progress = linear;
+            } else {
+              final overtime = _elapsedSeconds - (_estimatedSeconds * 0.8).toInt();
+              _progress = 0.8 + 0.19 * (1 - 1 / (1 + overtime / 60.0));
+            }
           }
         });
       }
@@ -244,6 +258,17 @@ class _HomeScreenState extends State<HomeScreen> {
         if (target.isEmpty) continue;
 
         final status = target['status'] as String?;
+
+        // 서버 진행률 업데이트
+        final progress = target['progress'] as int? ?? 0;
+        if (progress > _serverProgress) {
+          setState(() {
+            _serverProgress = progress;
+            _serverTotalChunks = target['total_chunks'] as int? ?? 0;
+            _serverCompletedChunks = target['completed_chunks'] as int? ?? 0;
+          });
+        }
+
         if (status == 'completed') {
           _tipTimer?.cancel();
           _progressTimer?.cancel();
@@ -258,6 +283,9 @@ class _HomeScreenState extends State<HomeScreen> {
           setState(() {
             _showGenerating = false;
             _waitingHere = false;
+            _serverProgress = 0;
+            _serverTotalChunks = 0;
+            _serverCompletedChunks = 0;
           });
 
           Navigator.push(
@@ -269,11 +297,20 @@ class _HomeScreenState extends State<HomeScreen> {
           _tipTimer?.cancel();
           _progressTimer?.cancel();
           if (!mounted) return;
+
+          final errorMessage = target['error_message'] as String?;
           setState(() {
             _showGenerating = false;
             _waitingHere = false;
+            _serverProgress = 0;
+            _serverTotalChunks = 0;
+            _serverCompletedChunks = 0;
           });
-          showErrorSnackBar(context, '카드 생성에 실패했습니다. 다른 PDF로 시도해주세요.');
+
+          final msg = errorMessage != null && errorMessage.isNotEmpty
+              ? '카드 생성 실패: $errorMessage'
+              : '카드 생성에 실패했습니다. 다른 PDF로 시도해주세요.';
+          showErrorSnackBar(context, msg);
           _loadSessions();
           return;
         }
@@ -307,18 +344,27 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       setState(() => _sessions = sessions);
 
-      // processing → completed로 바뀐 세션 감지
+      // processing → completed/failed로 바뀐 세션 감지
       for (final id in previousProcessing) {
         final updated = sessions.firstWhere(
           (s) => s['id'] == id,
           orElse: () => <String, dynamic>{},
         );
-        if (updated.isNotEmpty && updated['status'] == 'completed') {
+        if (updated.isEmpty) continue;
+        if (updated['status'] == 'completed') {
           final cardCount = updated['card_count'] as int;
           // 자동 저장
           await _tryAutoSave(id);
           if (mounted) {
             showSuccessSnackBar(context, '카드 $cardCount장이 생성되었습니다!');
+          }
+        } else if (updated['status'] == 'failed') {
+          if (mounted) {
+            final errorMsg = updated['error_message'] as String?;
+            final msg = errorMsg != null && errorMsg.isNotEmpty
+                ? '카드 생성 실패: $errorMsg'
+                : '카드 생성에 실패했습니다.';
+            showErrorSnackBar(context, msg);
           }
         }
       }
@@ -421,6 +467,106 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _showFailedSessionSheet(Map<String, dynamic> session) {
+    final cs = Theme.of(context).colorScheme;
+    final filename = (session['filename'] as String).replaceAll('.pdf', '');
+    final errorMessage = session['error_message'] as String?;
+    final sessionId = session['id'] as String;
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 헤더
+            Row(
+              children: [
+                Icon(Icons.error_outline_rounded, color: cs.error, size: 24),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '생성 실패',
+                    style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            // 파일명
+            Text(filename, style: Theme.of(ctx).textTheme.bodyMedium),
+            const SizedBox(height: 8),
+            // 에러 사유
+            if (errorMessage != null && errorMessage.isNotEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: cs.errorContainer.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  errorMessage,
+                  style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                        color: cs.onErrorContainer,
+                      ),
+                ),
+              ),
+            const SizedBox(height: 20),
+            // 안내 텍스트
+            Text(
+              '같은 PDF로 다시 시도하려면 홈에서 파일을 선택해주세요.',
+              style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
+            ),
+            const SizedBox(height: 16),
+            // 버튼
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _confirmDeleteSession(sessionId, filename);
+                    },
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: Size.zero,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    child: const Text('삭제'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      // 파일 선택 다이얼로그 열기
+                      _pickFile();
+                    },
+                    style: FilledButton.styleFrom(
+                      minimumSize: Size.zero,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    child: const Text('다시 만들기'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _confirmDeleteSession(String sessionId, String filename) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -507,6 +653,11 @@ class _HomeScreenState extends State<HomeScreen> {
             });
           }
         },
+        onServerBusy: (retryAfter) {
+          if (mounted) {
+            showInfoSnackBar(context, '서버가 바빠요. ${retryAfter}초 후 자동 재시도합니다...');
+          }
+        },
       );
 
       if (!mounted) return;
@@ -588,7 +739,9 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                '$_estimatedTimeLabel · $_generatedPageCount페이지',
+                _serverTotalChunks > 0
+                    ? '$_serverCompletedChunks/$_serverTotalChunks 청크 완료 · $_generatedPageCount페이지'
+                    : '$_estimatedTimeLabel · $_generatedPageCount페이지',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: cs.onSurfaceVariant,
                     ),
@@ -1142,7 +1295,7 @@ class _HomeScreenState extends State<HomeScreen> {
               if (status == 'processing') {
                 showInfoSnackBar(context, '아직 카드를 생성하고 있습니다. 잠시만 기다려주세요.');
               } else if (status == 'failed') {
-                showErrorSnackBar(context, '카드 생성에 실패한 세션입니다.');
+                _showFailedSessionSheet(s);
               } else {
                 _openSession(s['id'] as String);
               }

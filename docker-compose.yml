@@ -5,6 +5,11 @@ services:
       - "8001:8001"
     env_file:
       - ./back/.env.production
+    environment:
+      - MAX_CONCURRENT_CLI=3
+      - MAX_CLI_PER_SESSION=2
+      - MAX_CONCURRENT_SESSIONS=5
+      - SESSION_TIMEOUT_MINUTES=15
     volumes:
       - ./data:/app/data
     restart: always

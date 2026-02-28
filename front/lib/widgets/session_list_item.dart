@@ -30,6 +30,28 @@ class SessionListItem extends StatelessWidget {
     final folderId = session['folder_id'] as String?;
     final isProcessing = status == 'processing';
     final isFailed = status == 'failed';
+    final errorMessage = session['error_message'] as String?;
+    final progress = session['progress'] as int? ?? 0;
+    final totalChunks = session['total_chunks'] as int? ?? 0;
+    final completedChunks = session['completed_chunks'] as int? ?? 0;
+
+    // 진행률 서브라벨
+    String processingLabel;
+    if (isProcessing && totalChunks > 0) {
+      processingLabel = '생성 중 $completedChunks/$totalChunks ($progress%) · $timeAgo';
+    } else if (isProcessing) {
+      processingLabel = '생성 중... · $timeAgo';
+    } else if (isFailed && errorMessage != null && errorMessage.isNotEmpty) {
+      // 에러 메시지를 한 줄로 축약
+      final shortError = errorMessage.length > 40
+          ? '${errorMessage.substring(0, 40)}...'
+          : errorMessage;
+      processingLabel = '실패: $shortError';
+    } else if (isFailed) {
+      processingLabel = '생성 실패 · $timeAgo';
+    } else {
+      processingLabel = '${_templateLabel(templateType)} · $cardCount장 · $timeAgo';
+    }
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -97,15 +119,13 @@ class SessionListItem extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      isProcessing
-                          ? '생성 중... · $timeAgo'
-                          : isFailed
-                              ? '생성 실패 · $timeAgo'
-                              : '${_templateLabel(templateType)} · $cardCount장 · $timeAgo',
+                      processingLabel,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color:
                                 isFailed ? cs.error : cs.onSurfaceVariant,
                           ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
