@@ -419,20 +419,35 @@ async def generate_cards(
         if on_progress:
             await on_progress(completed_chunks=1, total_chunks=total_chunks, phase="generating")
     else:
-        tasks = [_generate_chunk(chunk, template_type, chunk_idx=i, session_id=session_id) for i, chunk in enumerate(chunks_list)]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
+        # 실시간 진행률: 각 청크 완료 시마다 콜백 호출
+        _completed_count = 0
+        _progress_lock = asyncio.Lock()
         result = []
         failed_chunks = 0
+
+        async def _chunk_with_progress(chunk, idx):
+            nonlocal _completed_count, failed_chunks
+            try:
+                cards = await _generate_chunk(chunk, template_type, chunk_idx=idx, session_id=session_id)
+                logger.info("청크 #%d 결과: %d장", idx, len(cards))
+                return cards
+            except Exception as e:
+                logger.error("청크 #%d 예외 실패: %s: %s", idx, type(e).__name__, e)
+                return e
+            finally:
+                async with _progress_lock:
+                    _completed_count += 1
+                    if on_progress:
+                        await on_progress(completed_chunks=_completed_count, total_chunks=total_chunks, phase="generating")
+
+        tasks = [_chunk_with_progress(chunk, i) for i, chunk in enumerate(chunks_list)]
+        results = await asyncio.gather(*tasks)
+
         for i, r in enumerate(results):
             if isinstance(r, Exception):
                 failed_chunks += 1
-                logger.error("청크 #%d 예외 실패: %s: %s", i, type(r).__name__, r)
             else:
-                logger.info("청크 #%d 결과: %d장", i, len(r))
                 result.extend(r)
-            if on_progress:
-                await on_progress(completed_chunks=i + 1, total_chunks=total_chunks, phase="generating")
 
         if failed_chunks > 0:
             logger.warning("전체 %d청크 중 %d개 실패, %d장 수집", len(chunks_list), failed_chunks, len(result))
