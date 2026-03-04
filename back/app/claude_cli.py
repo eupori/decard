@@ -106,6 +106,11 @@ async def run_claude(
     try:
         parsed = json.loads(raw)
         result_text = parsed.get("result", raw)
+        if not result_text and parsed.get("type") == "result":
+            # CLI가 성공했지만 빈 result 반환 (간헐적 --system-prompt 이슈)
+            logger.warning("CLI 빈 result 반환 (is_error=%s, duration=%sms)",
+                           parsed.get("is_error"), parsed.get("duration_ms"))
+            raise RuntimeError("Claude CLI 빈 result 반환")
         logger.info("CLI 결과 파싱 완료: %d chars, 앞 200자: %s", len(result_text), result_text[:200])
         return result_text
     except (json.JSONDecodeError, AttributeError):
