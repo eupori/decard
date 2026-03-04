@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import '../services/exam_history_service.dart';
 
-class SessionListItem extends StatelessWidget {
+class SessionListItem extends StatefulWidget {
   final Map<String, dynamic> session;
   final VoidCallback onTap;
   final VoidCallback onRemove;
@@ -17,7 +18,29 @@ class SessionListItem extends StatelessWidget {
   });
 
   @override
+  State<SessionListItem> createState() => _SessionListItemState();
+}
+
+class _SessionListItemState extends State<SessionListItem> {
+  ExamRecord? _lastExam;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadExamHistory();
+  }
+
+  Future<void> _loadExamHistory() async {
+    final sessionId = widget.session['id'] as String;
+    final records = await ExamHistoryService.getBySession(sessionId);
+    if (mounted && records.isNotEmpty) {
+      setState(() => _lastExam = records.first);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final session = widget.session;
     final cs = Theme.of(context).colorScheme;
     final displayName = session['display_name'] as String?;
     final filename = (session['filename'] as String).replaceAll('.pdf', '');
@@ -56,7 +79,7 @@ class SessionListItem extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: InkWell(
-        onTap: onTap,
+        onTap: widget.onTap,
         borderRadius: BorderRadius.circular(12),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -127,11 +150,23 @@ class SessionListItem extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
+                    if (isProcessing && progress > 0) ...[
+                      const SizedBox(height: 6),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(3),
+                        child: LinearProgressIndicator(
+                          value: progress / 100.0,
+                          minHeight: 4,
+                          backgroundColor: cs.surfaceContainerHighest,
+                          valueColor: AlwaysStoppedAnimation<Color>(cs.primary),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
               // 폴더 표시
-              if (showFolderIndicator &&
+              if (widget.showFolderIndicator &&
                   folderId != null &&
                   !isProcessing &&
                   !isFailed)
@@ -150,7 +185,27 @@ class SessionListItem extends StatelessWidget {
                     color: cs.primary,
                   ),
                 )
-              else if (!isFailed)
+              else if (!isFailed) ...[
+                if (_lastExam != null)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: _examScoreColor(_lastExam!.score).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '${_lastExam!.score.round()}점',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: _examScoreColor(_lastExam!.score),
+                        ),
+                      ),
+                    ),
+                  ),
                 Container(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 8, vertical: 3),
@@ -167,12 +222,13 @@ class SessionListItem extends StatelessWidget {
                     ),
                   ),
                 ),
+              ],
               const SizedBox(width: 4),
               IconButton(
-                onPressed: onRemove,
+                onPressed: widget.onRemove,
                 icon: Icon(Icons.close_rounded,
                     size: 18, color: cs.onSurfaceVariant),
-                tooltip: removeTooltip,
+                tooltip: widget.removeTooltip,
                 visualDensity: VisualDensity.compact,
                 padding: EdgeInsets.zero,
                 constraints:
@@ -183,6 +239,13 @@ class SessionListItem extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  static Color _examScoreColor(double score) {
+    if (score >= 90) return const Color(0xFF22C55E);
+    if (score >= 70) return const Color(0xFF6290C3);
+    if (score >= 50) return const Color(0xFFF59E0B);
+    return const Color(0xFFEF4444);
   }
 
   static IconData _sourceTypeIcon(String? sourceType, String templateType) {

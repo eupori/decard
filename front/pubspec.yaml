@@ -21,6 +21,9 @@ dependencies:
   web: ^1.1.0
   dio: ^5.9.1
   flutter_web_auth_2: ^4.0.1
+  google_sign_in: ^6.2.1
+  sign_in_with_apple: ^6.1.4
+  crypto: ^3.0.6
 
 dev_dependencies:
   flutter_test:

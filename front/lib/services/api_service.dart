@@ -431,6 +431,19 @@ class ApiService {
     }
   }
 
+  // ── Billing API ──
+
+  static Future<Map<String, dynamic>> getBillingStatus() async {
+    final response = await http.get(
+      Uri.parse(ApiConfig.billingStatusUrl),
+      headers: await _headers(),
+    );
+    if (response.statusCode != 200) {
+      throw ApiException('사용량 조회에 실패했습니다.', response.statusCode);
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
   // ── Explore API ──
 
   static Future<List<Map<String, dynamic>>> getExploreCategories() async {

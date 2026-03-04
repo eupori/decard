@@ -17,7 +17,11 @@ class UserModel(Base):
     __tablename__ = "users"
 
     id = Column(String, primary_key=True, default=lambda: f"usr_{uuid.uuid4().hex[:10]}")
-    kakao_id = Column(String, unique=True, nullable=False, index=True)
+    kakao_id = Column(String, unique=True, nullable=True, index=True)
+    google_id = Column(String, unique=True, nullable=True, index=True)
+    apple_id = Column(String, unique=True, nullable=True, index=True)
+    email = Column(String, nullable=True)
+    auth_provider = Column(String, default="kakao")  # kakao / google / apple
     nickname = Column(String, default="")
     profile_image = Column(String, default="")
     device_id = Column(String, index=True, nullable=True)
@@ -154,9 +158,10 @@ class GradeResponse(BaseModel):
 
 class UserResponse(BaseModel):
     id: str
-    kakao_id: str
     nickname: str
     profile_image: str
+    auth_provider: str = "kakao"
+    email: Optional[str] = None
 
 
 # ── Folder Schemas ──

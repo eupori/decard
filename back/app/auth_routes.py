@@ -5,12 +5,18 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
+from pydantic import BaseModel as PydanticBaseModel
+
 from .auth import (
     create_access_token,
     decode_token,
     exchange_kakao_code,
     get_kakao_user,
     find_or_create_user,
+    find_or_create_user_by_provider,
+    verify_google_token,
+    verify_apple_token,
+    delete_user_data,
     link_device_sessions,
     get_device_id,
 )
@@ -98,9 +104,10 @@ def get_me(request: Request, db: Session = Depends(get_db)):
 
     return UserResponse(
         id=user.id,
-        kakao_id=user.kakao_id,
         nickname=user.nickname,
         profile_image=user.profile_image,
+        auth_provider=user.auth_provider or "kakao",
+        email=user.email,
     ).model_dump()
 
 
@@ -126,3 +133,86 @@ def link_device(request: Request, db: Session = Depends(get_db)):
     link_device_sessions(db, user, device_id)
 
     return {"linked": True, "device_id": device_id}
+
+
+# ──────────────────────────────────────
+# Request schemas for token verification
+# ──────────────────────────────────────
+
+class GoogleVerifyRequest(PydanticBaseModel):
+    id_token: str
+
+
+class AppleVerifyRequest(PydanticBaseModel):
+    id_token: str
+    nonce: str | None = None
+    full_name: str | None = None
+
+
+# ──────────────────────────────────────
+# POST /auth/google/verify — Google ID Token 검증 → JWT 발급
+# ──────────────────────────────────────
+
+@router.post("/google/verify")
+def google_verify(body: GoogleVerifyRequest, db: Session = Depends(get_db)):
+    try:
+        google_user = verify_google_token(body.id_token)
+    except ValueError as e:
+        raise HTTPException(401, str(e))
+
+    user = find_or_create_user_by_provider(
+        db,
+        provider="google",
+        provider_id=google_user["sub"],
+        email=google_user.get("email", ""),
+        nickname=google_user.get("name", ""),
+        profile_image=google_user.get("picture", ""),
+    )
+
+    token = create_access_token(user.id)
+    return {"token": token, "user_id": user.id}
+
+
+# ──────────────────────────────────────
+# POST /auth/apple/verify — Apple ID Token 검증 → JWT 발급
+# ──────────────────────────────────────
+
+@router.post("/apple/verify")
+async def apple_verify(body: AppleVerifyRequest, db: Session = Depends(get_db)):
+    try:
+        apple_user = await verify_apple_token(body.id_token, body.nonce)
+    except ValueError as e:
+        raise HTTPException(401, str(e))
+
+    user = find_or_create_user_by_provider(
+        db,
+        provider="apple",
+        provider_id=apple_user["sub"],
+        email=apple_user.get("email", ""),
+        nickname=body.full_name or "",
+    )
+
+    token = create_access_token(user.id)
+    return {"token": token, "user_id": user.id}
+
+
+# ──────────────────────────────────────
+# DELETE /auth/me — 회원 탈퇴
+# ──────────────────────────────────────
+
+@router.delete("/me")
+def delete_me(request: Request, db: Session = Depends(get_db)):
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(401, "인증이 필요합니다.")
+
+    user_id = decode_token(auth_header[7:])
+    if not user_id:
+        raise HTTPException(401, "유효하지 않은 토큰입니다.")
+
+    user = db.query(UserModel).filter(UserModel.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "사용자를 찾을 수 없습니다.")
+
+    delete_user_data(db, user_id)
+    return {"deleted": True}

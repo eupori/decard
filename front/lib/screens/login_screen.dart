@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
@@ -64,14 +66,39 @@ class LoginScreen extends StatelessWidget {
                 label: '카카오로 시작하기',
               ),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: 12),
 
-              Text(
-                '더 많은 로그인 방식이 추가될 예정입니다',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: cs.onSurfaceVariant,
-                    ),
+              // Google 로그인
+              _SocialLoginButton(
+                onPressed: () => _handleGoogleLogin(context),
+                backgroundColor: Colors.white,
+                foregroundColor: const Color(0xFF1F1F1F),
+                icon: _googleIcon(),
+                label: 'Google로 시작하기',
+                borderColor: const Color(0xFFDADCE0),
               ),
+
+              // Apple 로그인 (iOS/macOS만)
+              if (!kIsWeb && (Platform.isIOS || Platform.isMacOS)) ...[
+                const SizedBox(height: 12),
+                _SocialLoginButton(
+                  onPressed: () => _handleAppleLogin(context),
+                  backgroundColor: cs.brightness == Brightness.dark
+                      ? Colors.white
+                      : Colors.black,
+                  foregroundColor: cs.brightness == Brightness.dark
+                      ? Colors.black
+                      : Colors.white,
+                  icon: Icon(
+                    Icons.apple_rounded,
+                    size: 22,
+                    color: cs.brightness == Brightness.dark
+                        ? Colors.black
+                        : Colors.white,
+                  ),
+                  label: 'Apple로 시작하기',
+                ),
+              ],
 
               const SizedBox(height: 32),
 
@@ -123,6 +150,36 @@ class LoginScreen extends StatelessWidget {
     }
   }
 
+  Future<void> _handleGoogleLogin(BuildContext context) async {
+    final error = await AuthService.loginWithGoogle();
+    if (!context.mounted) return;
+    if (error == null) {
+      showSuccessSnackBar(context, '로그인되었습니다!');
+      Navigator.pop(context, true);
+    } else {
+      showErrorSnackBar(context, error);
+    }
+  }
+
+  Future<void> _handleAppleLogin(BuildContext context) async {
+    final error = await AuthService.loginWithApple();
+    if (!context.mounted) return;
+    if (error == null) {
+      showSuccessSnackBar(context, '로그인되었습니다!');
+      Navigator.pop(context, true);
+    } else {
+      showErrorSnackBar(context, error);
+    }
+  }
+
+  Widget _googleIcon() {
+    return SizedBox(
+      width: 20,
+      height: 20,
+      child: CustomPaint(painter: _GoogleLogoPainter()),
+    );
+  }
+
   Widget _kakaoIcon() {
     return SizedBox(
       width: 22,
@@ -143,6 +200,7 @@ class _SocialLoginButton extends StatelessWidget {
   final Color foregroundColor;
   final Widget icon;
   final String label;
+  final Color? borderColor;
 
   const _SocialLoginButton({
     required this.onPressed,
@@ -150,6 +208,7 @@ class _SocialLoginButton extends StatelessWidget {
     required this.foregroundColor,
     required this.icon,
     required this.label,
+    this.borderColor,
   });
 
   @override
@@ -165,7 +224,9 @@ class _SocialLoginButton extends StatelessWidget {
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
-            side: BorderSide.none,
+            side: borderColor != null
+                ? BorderSide(color: borderColor!, width: 1)
+                : BorderSide.none,
           ),
         ),
         child: Row(
@@ -225,4 +286,52 @@ class _KakaoLogoPainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
+// ──────────────────────────────────────
+// Google 로고 (4색 G)
+// ──────────────────────────────────────
 
+class _GoogleLogoPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+
+    // Google "G" 로고 (간소화 4색)
+    final rect = Rect.fromLTWH(0, 0, w, h);
+
+    // 파랑 (오른쪽)
+    final blue = Paint()..color = const Color(0xFF4285F4)..style = PaintingStyle.fill;
+    canvas.drawArc(rect, -0.5, 1.8, true, blue);
+
+    // 초록 (아래 오른쪽)
+    final green = Paint()..color = const Color(0xFF34A853)..style = PaintingStyle.fill;
+    canvas.drawArc(rect, 1.3, 1.0, true, green);
+
+    // 노랑 (아래 왼쪽)
+    final yellow = Paint()..color = const Color(0xFFFBBC05)..style = PaintingStyle.fill;
+    canvas.drawArc(rect, 2.3, 0.7, true, yellow);
+
+    // 빨강 (위 왼쪽)
+    final red = Paint()..color = const Color(0xFFEA4335)..style = PaintingStyle.fill;
+    canvas.drawArc(rect, 3.0, 1.05, true, red);
+
+    // 중앙 흰 원 (도넛 모양)
+    final white = Paint()..color = const Color(0xFFFFFFFF)..style = PaintingStyle.fill;
+    final innerRect = Rect.fromCenter(center: Offset(w/2, h/2), width: w*0.55, height: h*0.55);
+    canvas.drawOval(innerRect, white);
+
+    // 오른쪽 가로 바
+    canvas.drawRect(
+      Rect.fromLTWH(w * 0.5, h * 0.38, w * 0.48, h * 0.24),
+      blue,
+    );
+    // 흰색 내부
+    canvas.drawRect(
+      Rect.fromLTWH(w * 0.5, h * 0.44, w * 0.38, h * 0.12),
+      white,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}

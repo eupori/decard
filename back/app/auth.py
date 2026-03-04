@@ -3,7 +3,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
+import jwt as pyjwt
 from fastapi import Request
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token as google_id_token
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
@@ -86,6 +89,202 @@ def find_or_create_user(db: Session, kakao_id: str, nickname: str, profile_image
     db.commit()
     db.refresh(user)
     return user
+
+
+# ──────────────────────────────────────
+# Google Token Verification
+# ──────────────────────────────────────
+
+def verify_google_token(id_token_str: str) -> dict:
+    """Verify Google ID token and return user info."""
+    try:
+        # 모든 Client ID 허용 (Web/iOS/Android)
+        valid_client_ids = [
+            settings.GOOGLE_CLIENT_ID_WEB,
+            settings.GOOGLE_CLIENT_ID_IOS,
+            settings.GOOGLE_CLIENT_ID_ANDROID,
+        ]
+        valid_client_ids = [cid for cid in valid_client_ids if cid]
+
+        idinfo = google_id_token.verify_oauth2_token(
+            id_token_str,
+            google_requests.Request(),
+        )
+
+        # audience 검증
+        if idinfo.get("aud") not in valid_client_ids:
+            raise ValueError("Invalid audience")
+
+        return {
+            "sub": idinfo["sub"],
+            "email": idinfo.get("email", ""),
+            "name": idinfo.get("name", ""),
+            "picture": idinfo.get("picture", ""),
+        }
+    except Exception as e:
+        logger.error("Google token verification failed: %s", e)
+        raise ValueError(f"Invalid Google token: {e}")
+
+
+# ──────────────────────────────────────
+# Apple Token Verification
+# ──────────────────────────────────────
+
+async def verify_apple_token(id_token_str: str, nonce: Optional[str] = None) -> dict:
+    """Verify Apple ID token and return user info."""
+    try:
+        # Apple 공개키 가져오기
+        async with httpx.AsyncClient() as client:
+            resp = await client.get("https://appleid.apple.com/auth/keys")
+            resp.raise_for_status()
+            apple_keys = resp.json()
+
+        # JWT 헤더에서 kid 추출
+        header = pyjwt.get_unverified_header(id_token_str)
+        kid = header.get("kid")
+
+        # 매칭 키 찾기
+        key_data = None
+        for key in apple_keys.get("keys", []):
+            if key.get("kid") == kid:
+                key_data = key
+                break
+
+        if not key_data:
+            raise ValueError("Apple public key not found")
+
+        # 공개키로 JWT 디코딩
+        from jwt.algorithms import RSAAlgorithm
+        public_key = RSAAlgorithm.from_jwk(key_data)
+
+        payload = pyjwt.decode(
+            id_token_str,
+            public_key,
+            algorithms=["RS256"],
+            audience=settings.APPLE_BUNDLE_ID,
+            issuer="https://appleid.apple.com",
+        )
+
+        return {
+            "sub": payload["sub"],
+            "email": payload.get("email", ""),
+        }
+    except Exception as e:
+        logger.error("Apple token verification failed: %s", e)
+        raise ValueError(f"Invalid Apple token: {e}")
+
+
+# ──────────────────────────────────────
+# Provider-based user creation
+# ──────────────────────────────────────
+
+def find_or_create_user_by_provider(
+    db: Session,
+    provider: str,
+    provider_id: str,
+    email: str = "",
+    nickname: str = "",
+    profile_image: str = "",
+) -> UserModel:
+    """Find or create user by provider (google/apple)."""
+    # provider별 ID 컬럼으로 검색
+    if provider == "google":
+        user = db.query(UserModel).filter(UserModel.google_id == provider_id).first()
+    elif provider == "apple":
+        user = db.query(UserModel).filter(UserModel.apple_id == provider_id).first()
+    else:
+        raise ValueError(f"Unknown provider: {provider}")
+
+    if user:
+        # 기존 유저 업데이트
+        if nickname:
+            user.nickname = nickname
+        if profile_image:
+            user.profile_image = profile_image
+        if email:
+            user.email = email
+        db.commit()
+        db.refresh(user)
+        return user
+
+    # 이메일로 기존 유저 검색 (다른 provider로 이미 가입한 경우 연동)
+    if email:
+        existing = db.query(UserModel).filter(UserModel.email == email).first()
+        if existing:
+            if provider == "google":
+                existing.google_id = provider_id
+            elif provider == "apple":
+                existing.apple_id = provider_id
+            if nickname and not existing.nickname:
+                existing.nickname = nickname
+            if profile_image and not existing.profile_image:
+                existing.profile_image = profile_image
+            db.commit()
+            db.refresh(existing)
+            return existing
+
+    # 새 유저 생성
+    new_user_kwargs = {
+        "nickname": nickname,
+        "profile_image": profile_image,
+        "email": email,
+        "auth_provider": provider,
+    }
+    if provider == "google":
+        new_user_kwargs["google_id"] = provider_id
+    elif provider == "apple":
+        new_user_kwargs["apple_id"] = provider_id
+
+    user = UserModel(**new_user_kwargs)
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+# ──────────────────────────────────────
+# Delete user data
+# ──────────────────────────────────────
+
+def delete_user_data(db: Session, user_id: str):
+    """Delete all user data (sessions, cards, folders, reviews, grades)."""
+    from .models import CardModel, GradeModel, CardReviewModel
+
+    # 유저의 세션 ID 목록
+    sessions = db.query(SessionModel).filter(SessionModel.user_id == user_id).all()
+    session_ids = [s.id for s in sessions]
+
+    # 카드 ID 목록 (세션에 속한 카드들)
+    if session_ids:
+        cards = db.query(CardModel).filter(CardModel.session_id.in_(session_ids)).all()
+        card_ids = [c.id for c in cards]
+
+        # Grades 삭제
+        if card_ids:
+            db.query(GradeModel).filter(GradeModel.card_id.in_(card_ids)).delete(synchronize_session=False)
+
+        # CardReviews 삭제
+        if card_ids:
+            db.query(CardReviewModel).filter(CardReviewModel.card_id.in_(card_ids)).delete(synchronize_session=False)
+
+        # Cards 삭제
+        if card_ids:
+            db.query(CardModel).filter(CardModel.session_id.in_(session_ids)).delete(synchronize_session=False)
+
+        # Sessions 삭제
+        db.query(SessionModel).filter(SessionModel.user_id == user_id).delete(synchronize_session=False)
+
+    # CardReviews (유저 직접 연결) 삭제
+    db.query(CardReviewModel).filter(CardReviewModel.user_id == user_id).delete(synchronize_session=False)
+
+    # Folders 삭제
+    db.query(FolderModel).filter(FolderModel.user_id == user_id).delete(synchronize_session=False)
+
+    # User 삭제
+    db.query(UserModel).filter(UserModel.id == user_id).delete(synchronize_session=False)
+
+    db.commit()
+    logger.info("Deleted all data for user %s", user_id)
 
 
 def link_device_sessions(db: Session, user: UserModel, device_id: str):

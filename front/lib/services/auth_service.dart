@@ -1,6 +1,10 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
+import 'package:crypto/crypto.dart';
 import '../config/api_config.dart';
 import 'device_service.dart';
 
@@ -92,5 +96,114 @@ class AuthService {
 
   static Future<void> logout() async {
     await clearToken();
+  }
+
+  // ── Google Login ──
+
+  static Future<String?> loginWithGoogle() async {
+    try {
+      final googleSignIn = GoogleSignIn(scopes: ['email', 'profile']);
+      final account = await googleSignIn.signIn();
+      if (account == null) return null; // 사용자 취소
+
+      final auth = await account.authentication;
+      final idToken = auth.idToken;
+      if (idToken == null) return '토큰을 가져올 수 없습니다.';
+
+      final response = await http.post(
+        Uri.parse(ApiConfig.googleVerifyUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'id_token': idToken}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final token = data['token'] as String;
+        await setToken(token);
+        await linkDevice();
+        return null; // 성공
+      } else {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return data['detail'] as String? ?? '로그인에 실패했습니다.';
+      }
+    } catch (e) {
+      return '로그인 중 오류가 발생했습니다.';
+    }
+  }
+
+  // ── Apple Login ──
+
+  static Future<String?> loginWithApple() async {
+    try {
+      final rawNonce = _generateNonce();
+      final hashedNonce = sha256.convert(utf8.encode(rawNonce)).toString();
+
+      final credential = await SignInWithApple.getAppleIDCredential(
+        scopes: [
+          AppleIDAuthorizationScopes.email,
+          AppleIDAuthorizationScopes.fullName,
+        ],
+        nonce: hashedNonce,
+      );
+
+      final idToken = credential.identityToken;
+      if (idToken == null) return '토큰을 가져올 수 없습니다.';
+
+      final response = await http.post(
+        Uri.parse(ApiConfig.appleVerifyUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'id_token': idToken,
+          'nonce': rawNonce,
+          'full_name': credential.givenName != null
+              ? '${credential.familyName ?? ''} ${credential.givenName}'.trim()
+              : null,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final token = data['token'] as String;
+        await setToken(token);
+        await linkDevice();
+        return null; // 성공
+      } else {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return data['detail'] as String? ?? '로그인에 실패했습니다.';
+      }
+    } catch (e) {
+      if (e.toString().contains('AuthorizationErrorCode.canceled')) {
+        return null; // 사용자 취소 — 에러 아님
+      }
+      return '로그인 중 오류가 발생했습니다.';
+    }
+  }
+
+  static String _generateNonce([int length = 32]) {
+    const charset = '0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._';
+    final random = Random.secure();
+    return List.generate(length, (_) => charset[random.nextInt(charset.length)]).join();
+  }
+
+  // ── Delete Account ──
+
+  static Future<bool> deleteAccount() async {
+    final token = await getToken();
+    if (token == null) return false;
+
+    try {
+      final response = await http.delete(
+        Uri.parse(ApiConfig.deleteAccountUrl),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+
+      if (response.statusCode == 200) {
+        await clearToken();
+        return true;
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
   }
 }

@@ -23,6 +23,7 @@ from .models import (
     PublishRequest,
 )
 from .pdf_service import extract_text_from_pdf, validate_pdf
+from .billing_service import get_billing_status, can_generate
 from .card_service import generate_cards
 from .grade_service import grade_answer
 from .srs_service import calculate_sm2
@@ -49,6 +50,12 @@ async def generate(
     # "subjective" — TODO: MVP 이후 추가
     if template_type not in ("definition", "cloze", "comparison"):
         raise HTTPException(400, "지원하지 않는 템플릿입니다. (definition / cloze / comparison)")
+
+    # 월간 생성 한도 체크
+    owner = get_owner_id(request)
+    billing = can_generate(owner["user_id"], device_id, db)
+    if not billing["allowed"]:
+        raise HTTPException(429, billing["message"])
 
     # File size pre-check (Content-Length header)
     if file.size and file.size > settings.MAX_PDF_SIZE_MB * 1024 * 1024:
@@ -81,7 +88,6 @@ async def generate(
         )
 
     # 세션 생성 (즉시 반환 — 텍스트 추출은 백그라운드에서)
-    owner = get_owner_id(request)
     session = SessionModel(
         filename=file.filename or "unknown.pdf",
         page_count=0,
@@ -107,6 +113,20 @@ async def generate(
     )
 
     return _build_session_response(session)
+
+
+# ──────────────────────────────────────
+# GET /api/v1/billing/status — 월간 사용량 조회
+# ──────────────────────────────────────
+
+@router.get("/billing/status")
+def billing_status(
+    request: Request,
+    db: Session = Depends(get_db),
+    device_id: str = Depends(get_device_id),
+):
+    owner = get_owner_id(request)
+    return get_billing_status(owner["user_id"], device_id, db)
 
 
 # ──────────────────────────────────────
@@ -744,8 +764,13 @@ async def _generate_in_background(
                 return
             session.completed_chunks = completed_chunks
             session.total_chunks = total_chunks
-            if phase == "generating":
-                session.progress = int(completed_chunks / max(total_chunks, 1) * 80)
+            if phase == "extracting":
+                session.progress = 5
+            elif phase == "chunked":
+                session.progress = 10
+            elif phase == "generating":
+                # 10~80% 구간: 청크 진행에 비례
+                session.progress = 10 + int(completed_chunks / max(total_chunks, 1) * 70)
             elif phase == "reviewing":
                 session.progress = 85
             elif phase == "done":
@@ -758,6 +783,7 @@ async def _generate_in_background(
 
     try:
         # 텍스트 추출 (백그라운드에서 실행)
+        await _update_progress(0, 0, "extracting")
         pages = extract_text_from_pdf(pdf_content)
         if not pages:
             raise ValueError("텍스트를 추출할 수 없는 PDF입니다.")
@@ -771,6 +797,7 @@ async def _generate_in_background(
 
         session.page_count = len(pages)
         db.commit()
+        await _update_progress(0, 0, "chunked")
 
         cards_data = await generate_cards(
             pages, template_type,

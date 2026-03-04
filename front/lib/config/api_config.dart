@@ -24,10 +24,16 @@ class ApiConfig {
   static String get createManualUrl => '$baseUrl$apiPrefix/sessions/create-manual';
   static String get importFileUrl => '$baseUrl$apiPrefix/sessions/import-file';
 
+  // Billing
+  static String get billingStatusUrl => '$baseUrl$apiPrefix/billing/status';
+
   // Auth
   static String get kakaoLoginUrl => '$baseUrl$apiPrefix/auth/kakao/login';
   static String get authMeUrl => '$baseUrl$apiPrefix/auth/me';
   static String get linkDeviceUrl => '$baseUrl$apiPrefix/auth/link-device';
+  static String get googleVerifyUrl => '$baseUrl$apiPrefix/auth/google/verify';
+  static String get appleVerifyUrl => '$baseUrl$apiPrefix/auth/apple/verify';
+  static String get deleteAccountUrl => '$baseUrl$apiPrefix/auth/me';
 
   // Folders
   static String get foldersUrl => '$baseUrl$apiPrefix/folders';

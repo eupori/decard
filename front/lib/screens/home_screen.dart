@@ -56,6 +56,11 @@ class _HomeScreenState extends State<HomeScreen> {
   int _serverProgress = 0;  // 서버에서 받은 실제 진행률 (0~100)
   int _serverTotalChunks = 0;
   int _serverCompletedChunks = 0;
+  DateTime? _serverProcessingStartedAt;  // 서버 처리 시작 시각
+
+  // 홈 전환 시 포그라운드 진행률 유지
+  String? _progressOverrideSessionId;
+  int _progressOverrideValue = 0;
 
   final _tips = [
     'PDF 꼼꼼히 읽는 중...',
@@ -86,6 +91,11 @@ class _HomeScreenState extends State<HomeScreen> {
   int _reviewsToday = 0;
   bool _statsLoaded = false;
 
+  // Billing state
+  int _freeRemaining = -1; // -1 = 아직 로드 안 됨
+  int _freeLimit = 10;
+  String? _resetsAt;
+
   final _templateOptions = [
     ('definition', '정의형', 'OO란? 형태의 Q&A', Icons.menu_book_rounded),
     ('cloze', '빈칸형', '핵심 키워드 빈칸 채우기', Icons.edit_note_rounded),
@@ -103,6 +113,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _checkAuthState();
     _loadSessions();
     _loadStudyStats();
+    _loadBillingStatus();
   }
 
   @override
@@ -187,6 +198,58 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) showSuccessSnackBar(context, '로그아웃되었습니다.');
   }
 
+  String get _authProviderLabel {
+    final provider = _user?['auth_provider'] ?? 'kakao';
+    switch (provider) {
+      case 'google':
+        return 'Google 계정';
+      case 'apple':
+        return 'Apple 계정';
+      default:
+        return '카카오 계정';
+    }
+  }
+
+  Future<void> _handleDeleteAccount() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('회원 탈퇴'),
+        content: const Text(
+          '탈퇴하면 모든 데이터가 삭제되며 복구할 수 없습니다.\n정말 탈퇴하시겠습니까?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('탈퇴'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    final success = await AuthService.deleteAccount();
+    if (mounted) {
+      if (success) {
+        setState(() {
+          _isLoggedIn = false;
+          _user = null;
+        });
+        _loadSessions();
+        showSuccessSnackBar(context, '회원 탈퇴가 완료되었습니다.');
+      } else {
+        showErrorSnackBar(context, '회원 탈퇴에 실패했습니다. 다시 시도해주세요.');
+      }
+    }
+  }
+
   int get _estimatedSeconds => (_generatedPageCount * 35).clamp(90, 900);
 
   String get _estimatedTimeLabel {
@@ -195,13 +258,20 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _startWaitingHere() {
-    _elapsedSeconds = 0;
+    // 업로드 완료 후 이미 경과한 시간을 반영 (선택 화면에서 기다린 시간)
+    final elapsed = _serverProcessingStartedAt != null
+        ? DateTime.now().difference(_serverProcessingStartedAt!).inSeconds
+        : 0;
+    _elapsedSeconds = elapsed;
     _progress = 0.0;
     _serverProgress = 0;
     _serverTotalChunks = 0;
     _serverCompletedChunks = 0;
 
     setState(() => _waitingHere = true);
+
+    // 서버에서 현재 진행률 즉시 확인 (대기 중 이미 진행됐을 수 있음)
+    _fetchInitialProgress();
 
     // 문구 로테이션
     _tipIndex = 0;
@@ -241,6 +311,27 @@ class _HomeScreenState extends State<HomeScreen> {
 
     // 완료 폴링 (5초 간격)
     _pollUntilDone();
+  }
+
+  Future<void> _fetchInitialProgress() async {
+    if (_generatedSessionId == null) return;
+    try {
+      final sessions = await ApiService.listSessions();
+      final target = sessions.firstWhere(
+        (s) => s['id'] == _generatedSessionId,
+        orElse: () => <String, dynamic>{},
+      );
+      if (target.isNotEmpty && mounted && _waitingHere) {
+        final progress = target['progress'] as int? ?? 0;
+        if (progress > _serverProgress) {
+          setState(() {
+            _serverProgress = progress;
+            _serverTotalChunks = target['total_chunks'] as int? ?? 0;
+            _serverCompletedChunks = target['completed_chunks'] as int? ?? 0;
+          });
+        }
+      }
+    } catch (_) {}
   }
 
   Future<void> _pollUntilDone() async {
@@ -320,10 +411,30 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// 포그라운드에서 넘어온 진행률이 서버보다 높으면 세션 데이터에 주입
+  void _applyProgressOverride() {
+    if (_progressOverrideSessionId == null) return;
+    final idx = _sessions.indexWhere(
+      (s) => s['id'] == _progressOverrideSessionId,
+    );
+    if (idx < 0) return;
+    final serverProgress = _sessions[idx]['progress'] as int? ?? 0;
+    final status = _sessions[idx]['status'] as String? ?? '';
+    if (serverProgress >= _progressOverrideValue || status != 'processing') {
+      // 서버가 따라잡았거나 완료됨 → override 해제
+      _progressOverrideSessionId = null;
+      _progressOverrideValue = 0;
+    } else {
+      // 서버보다 높은 진행률 주입
+      _sessions[idx] = Map<String, dynamic>.from(_sessions[idx])
+        ..['progress'] = _progressOverrideValue;
+    }
+  }
+
   void _startPollingIfNeeded() {
     final hasProcessing = _sessions.any((s) => s['status'] == 'processing');
     if (hasProcessing && _pollingTimer == null) {
-      _pollingTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      _pollingTimer = Timer.periodic(const Duration(seconds: 5), (_) {
         _pollSessions();
       });
     } else if (!hasProcessing && _pollingTimer != null) {
@@ -342,7 +453,10 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final sessions = await ApiService.listSessions();
       if (!mounted) return;
-      setState(() => _sessions = sessions);
+      setState(() {
+        _sessions = sessions;
+        _applyProgressOverride();
+      });
 
       // processing → completed/failed로 바뀐 세션 감지
       for (final id in previousProcessing) {
@@ -399,7 +513,10 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final sessions = await ApiService.listSessions();
       if (mounted) {
-        setState(() => _sessions = sessions);
+        setState(() {
+          _sessions = sessions;
+          _applyProgressOverride();
+        });
         _startPollingIfNeeded();
       }
     } catch (_) {
@@ -422,6 +539,21 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (_) {
       // 통계 로드 실패 시 무시 (SRS 기능 없이도 앱 정상 작동)
+    }
+  }
+
+  Future<void> _loadBillingStatus() async {
+    try {
+      final data = await ApiService.getBillingStatus();
+      if (mounted) {
+        setState(() {
+          _freeRemaining = data['remaining'] as int? ?? 0;
+          _freeLimit = data['limit'] as int? ?? 10;
+          _resetsAt = data['resets_at'] as String?;
+        });
+      }
+    } catch (_) {
+      // 실패 시 제한 없이 동작 (서버 미업데이트 대비)
     }
   }
 
@@ -631,6 +763,12 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    // 월간 한도 체크
+    if (_freeRemaining == 0) {
+      _showLimitDialog();
+      return;
+    }
+
     setState(() {
       _error = null;
       _showGenerating = true;
@@ -667,10 +805,12 @@ class _HomeScreenState extends State<HomeScreen> {
         _uploadDone = true;
         _generatedSessionId = result.id;
         _generatedPageCount = result.pageCount;
+        _serverProcessingStartedAt = DateTime.now();
         _selectedFilePath = null;
         _selectedFileName = null;
         _selectedFileBytes = null;
       });
+      _loadBillingStatus();
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -679,6 +819,31 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     }
+  }
+
+  void _showLimitDialog() {
+    final resetDate = _resetsAt != null
+        ? DateTime.tryParse(_resetsAt!)
+        : null;
+    final resetLabel = resetDate != null
+        ? '${resetDate.month}월 ${resetDate.day}일'
+        : '다음 달 1일';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('이번 달 무료 횟수 소진'),
+        content: Text(
+          '무료 카드 생성 $_freeLimit회를 모두 사용했습니다.\n$resetLabel에 리셋됩니다.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('확인'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -764,6 +929,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 onPressed: () {
                   _tipTimer?.cancel();
                   _progressTimer?.cancel();
+                  // 현재 포그라운드 진행률을 홈 세션 목록에 전달
+                  _progressOverrideSessionId = _generatedSessionId;
+                  _progressOverrideValue = (_progress * 100).toInt().clamp(0, 99);
                   setState(() {
                     _waitingHere = false;
                     _showGenerating = false;
@@ -1129,11 +1297,47 @@ class _HomeScreenState extends State<HomeScreen> {
 
                     const SizedBox(height: 14),
 
-                    // 생성 버튼
+                    // 잔여 횟수 + 생성 버튼
+                    if (_freeRemaining >= 0) ...[
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Row(
+                          children: [
+                            Icon(
+                              _freeRemaining > 0
+                                  ? Icons.local_fire_department_rounded
+                                  : Icons.block_rounded,
+                              size: 16,
+                              color: _freeRemaining > 3
+                                  ? cs.onSurfaceVariant
+                                  : _freeRemaining > 0
+                                      ? cs.error.withValues(alpha: 0.8)
+                                      : cs.error,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              _freeRemaining > 0
+                                  ? '이번 달 무료 $_freeRemaining회 남음'
+                                  : '이번 달 무료 횟수 소진',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: _freeRemaining > 3
+                                    ? cs.onSurfaceVariant
+                                    : _freeRemaining > 0
+                                        ? cs.error.withValues(alpha: 0.8)
+                                        : cs.error,
+                                fontWeight: _freeRemaining <= 3 ? FontWeight.w600 : null,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     SizedBox(
                       width: double.infinity,
                       child: FilledButton.icon(
-                        onPressed: _hasFile ? _generate : null,
+                        onPressed: _freeRemaining == 0
+                            ? _showLimitDialog
+                            : _hasFile ? _generate : null,
                         icon: const Icon(Icons.auto_awesome_rounded, size: 20),
                         label: const Text('카드 만들기',
                             style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
@@ -1464,7 +1668,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         : null,
                   ),
                   title: Text(nickname.isNotEmpty ? nickname : '사용자'),
-                  subtitle: const Text('카카오 계정'),
+                  subtitle: Text(_authProviderLabel),
                 ),
                 const Divider(),
                 ListTile(
@@ -1473,6 +1677,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   onTap: () {
                     Navigator.pop(context);
                     _handleLogout();
+                  },
+                ),
+                ListTile(
+                  leading: Icon(Icons.delete_forever_rounded,
+                      color: Theme.of(context).colorScheme.error),
+                  title: Text('회원 탈퇴',
+                      style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _handleDeleteAccount();
                   },
                 ),
                 const SizedBox(height: 8),
@@ -1578,7 +1792,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 onTap: () {
                   Navigator.pop(context);
                   launchUrl(
-                      Uri.parse('https://open.kakao.com/o/TODO_PLACEHOLDER'),
+                      Uri.parse('https://open.kakao.com/o/gVjQRvji'),
                       mode: LaunchMode.externalApplication);
                 },
               ),

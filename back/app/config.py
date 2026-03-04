@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     # Limits
     MAX_PDF_SIZE_MB: int = 10
     MAX_PAGES: int = 100
+    FREE_MONTHLY_LIMIT: int = 10
 
     # Kakao OAuth
     KAKAO_CLIENT_ID: str = ""
@@ -26,6 +27,14 @@ class Settings(BaseSettings):
     # JWT
     JWT_SECRET_KEY: str = "change-me-in-production"
     JWT_EXPIRE_HOURS: int = 168  # 7 days
+
+    # Google OAuth
+    GOOGLE_CLIENT_ID_WEB: str = ""
+    GOOGLE_CLIENT_ID_IOS: str = ""
+    GOOGLE_CLIENT_ID_ANDROID: str = ""
+
+    # Apple Sign In
+    APPLE_BUNDLE_ID: str = "dev.eupori.decard"
 
     # Slack
     SLACK_WEBHOOK_URL: str = ""
