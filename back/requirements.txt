@@ -10,5 +10,6 @@ httpx==0.27.0
 psutil==6.1.0
 openpyxl
 google-auth==2.38.0
+requests>=2.31.0
 PyJWT==2.10.1
 cryptography>=43.0.0
