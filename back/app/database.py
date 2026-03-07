@@ -146,20 +146,23 @@ def _migrate_users_auth_providers():
         if "auth_provider" not in columns:
             conn.execute(text("ALTER TABLE users ADD COLUMN auth_provider VARCHAR DEFAULT 'kakao'"))
 
-    # kakao_id nullable 처리: SQLite는 ALTER COLUMN 미지원이라 테이블 재생성 필요
-    # 하지만 기존 데이터 모두 kakao_id가 있으므로, 새 유저만 nullable이면 됨
-    # SQLAlchemy 모델에서 nullable=True로 이미 변경했으므로 새 테이블은 문제없음
-    # 기존 테이블은 NOT NULL 제약이 남아있지만, INSERT 시 NULL을 넣으면
-    # SQLite는 기본적으로 NOT NULL 제약을 무시하지 않음
-    # → 테이블 재생성 마이그레이션 필요
-    _recreate_users_table_if_needed(conn, columns)
+        # kakao_id nullable 처리: SQLite는 ALTER COLUMN 미지원이라 테이블 재생성 필요
+        # 하지만 기존 데이터 모두 kakao_id가 있으므로, 새 유저만 nullable이면 됨
+        # SQLAlchemy 모델에서 nullable=True로 이미 변경했으므로 새 테이블은 문제없음
+        # 기존 테이블은 NOT NULL 제약이 남아있지만, INSERT 시 NULL을 넣으면
+        # SQLite는 기본적으로 NOT NULL 제약을 무시하지 않음
+        # → 테이블 재생성 마이그레이션 필요
+        _recreate_users_table_if_needed(conn, columns)
 
 
 def _recreate_users_table_if_needed(conn, columns):
     """Recreate users table to make kakao_id nullable (SQLite limitation)."""
-    if "auth_provider" in columns:
-        # 이미 마이그레이션 완료된 상태면 스킵 (auth_provider가 원래부터 있었으면 새 스키마)
-        return
+    # kakao_id가 실제로 nullable인지 확인
+    from sqlalchemy import inspect as sa_inspect
+    insp = sa_inspect(engine)
+    kakao_col = next((c for c in insp.get_columns("users") if c["name"] == "kakao_id"), None)
+    if kakao_col and kakao_col.get("nullable", True):
+        return  # 이미 nullable이면 스킵
 
     # 기존 데이터 백업 → 새 테이블 생성 → 데이터 복원
     conn.execute(text("ALTER TABLE users RENAME TO users_old"))

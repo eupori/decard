@@ -6,6 +6,7 @@ import '../config/theme.dart';
 import '../models/card_model.dart';
 import '../services/api_service.dart';
 import '../utils/cloze_text.dart';
+import '../widgets/content_width.dart';
 
 class StudyScreen extends StatefulWidget {
   final List<CardModel> cards;
@@ -415,7 +416,9 @@ class _StudyScreenState extends State<StudyScreen>
         ],
       ),
       body: SafeArea(
-        child: Column(
+        child: ContentWidth(
+          maxWidth: 560,
+          child: Column(
           children: [
             // 진행률
             Padding(
@@ -634,6 +637,7 @@ class _StudyScreenState extends State<StudyScreen>
               ),
           ],
         ),
+      ),
       ),
     );
   }

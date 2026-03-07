@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import '../config/responsive.dart';
 import '../models/folder_model.dart';
 import '../services/api_service.dart';
 import '../utils/snackbar_helper.dart';
+import '../widgets/content_width.dart';
 import '../widgets/folder_edit_dialog.dart';
 import 'folder_detail_screen.dart';
 
@@ -213,16 +215,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
       );
     }
 
-    return GridView.builder(
-      padding: const EdgeInsets.all(16),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 1.1,
+    final crossAxisCount = Responsive.isTablet(context) ? 3 : 2;
+    return ContentWidth(
+      child: GridView.builder(
+        padding: const EdgeInsets.all(16),
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: crossAxisCount,
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+          childAspectRatio: 1.1,
+        ),
+        itemCount: _folders.length,
+        itemBuilder: (context, index) => _buildFolderCard(cs, _folders[index]),
       ),
-      itemCount: _folders.length,
-      itemBuilder: (context, index) => _buildFolderCard(cs, _folders[index]),
     );
   }
 

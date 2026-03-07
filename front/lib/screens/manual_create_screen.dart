@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import '../services/api_service.dart';
 import '../utils/snackbar_helper.dart';
+import '../widgets/content_width.dart';
 import 'review_screen.dart';
 
 /// 카드 유형 enum
@@ -342,7 +343,8 @@ class _ManualCreateScreenState extends State<ManualCreateScreen>
     return GestureDetector(
       onTap: () => FocusScope.of(context).unfocus(),
       behavior: HitTestBehavior.opaque,
-      child: Column(
+      child: ContentWidth(
+        child: Column(
         children: [
           Expanded(
             child: SingleChildScrollView(
@@ -422,6 +424,7 @@ class _ManualCreateScreenState extends State<ManualCreateScreen>
             ),
           ),
         ],
+      ),
       ),
     );
   }
@@ -805,7 +808,8 @@ class _ManualCreateScreenState extends State<ManualCreateScreen>
       behavior: HitTestBehavior.opaque,
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
-        child: Column(
+        child: ContentWidth(
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
@@ -894,6 +898,7 @@ class _ManualCreateScreenState extends State<ManualCreateScreen>
                       TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
             ),
           ],
+        ),
         ),
       ),
     );

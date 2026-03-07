@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../config/responsive.dart';
 import '../services/auth_service.dart';
 import 'home_screen.dart';
 import 'library_screen.dart';
@@ -12,7 +13,10 @@ final ValueNotifier<bool> hideBottomNav = ValueNotifier(false);
 final ValueNotifier<int> mainTabIndex = ValueNotifier(0);
 
 /// push된 화면(ReviewScreen, FolderDetailScreen 등)에서 쓸 바텀바
-Widget buildAppBottomNav(BuildContext context, {int selectedIndex = 0}) {
+/// 태블릿에서는 null 반환 (NavigationRail이 MainScreen에서 처리)
+Widget? buildAppBottomNav(BuildContext context, {int selectedIndex = 0}) {
+  if (Responsive.isTablet(context)) return null;
+
   final cs = Theme.of(context).colorScheme;
   return NavigationBar(
     selectedIndex: selectedIndex,
@@ -77,6 +81,7 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final isTablet = Responsive.isTablet(context);
 
     return PopScope(
       canPop: false,
@@ -101,16 +106,61 @@ class _MainScreenState extends State<MainScreen> {
       child: ValueListenableBuilder<bool>(
       valueListenable: hideBottomNav,
       builder: (context, hidden, _) {
+        final body = IndexedStack(
+          index: mainTabIndex.value,
+          children: [
+            const HomeScreen(),
+            _isLoggedIn
+                ? const LibraryScreen()
+                : _buildLoginRequired(cs),
+          ],
+        );
+
+        if (isTablet) {
+          return Scaffold(
+            body: Row(
+              children: [
+                if (!hidden)
+                  NavigationRail(
+                    selectedIndex: mainTabIndex.value,
+                    onDestinationSelected: (i) {
+                      mainTabIndex.value = i;
+                    },
+                    labelType: NavigationRailLabelType.all,
+                    backgroundColor: cs.surface,
+                    indicatorColor: cs.primaryContainer,
+                    leading: Padding(
+                      padding: const EdgeInsets.only(top: 8, bottom: 16),
+                      child: Icon(Icons.style_rounded,
+                          size: 32, color: cs.primary),
+                    ),
+                    destinations: const [
+                      NavigationRailDestination(
+                        icon: Icon(Icons.home_outlined),
+                        selectedIcon: Icon(Icons.home_rounded),
+                        label: Text('홈'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.folder_outlined),
+                        selectedIcon: Icon(Icons.folder_rounded),
+                        label: Text('보관함'),
+                      ),
+                    ],
+                  ),
+                if (!hidden)
+                  VerticalDivider(
+                    width: 1,
+                    thickness: 1,
+                    color: cs.outlineVariant,
+                  ),
+                Expanded(child: body),
+              ],
+            ),
+          );
+        }
+
         return Scaffold(
-          body: IndexedStack(
-            index: mainTabIndex.value,
-            children: [
-              const HomeScreen(),
-              _isLoggedIn
-                  ? const LibraryScreen()
-                  : _buildLoginRequired(cs),
-            ],
-          ),
+          body: body,
           bottomNavigationBar: hidden
               ? null
               : NavigationBar(

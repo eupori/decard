@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../utils/snackbar_helper.dart';
+import '../widgets/content_width.dart';
 import 'review_screen.dart';
 import 'login_screen.dart';
 
@@ -140,7 +141,8 @@ class _ExploreCardsetScreenState extends State<ExploreCardsetScreen> {
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
-      child: Column(
+      child: ContentWidth(
+        child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // 헤더 카드
@@ -227,6 +229,7 @@ class _ExploreCardsetScreenState extends State<ExploreCardsetScreen> {
           // 하단 여백 (버튼 가림 방지)
           const SizedBox(height: 80),
         ],
+      ),
       ),
     );
   }

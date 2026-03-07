@@ -126,6 +126,28 @@ def verify_google_token(id_token_str: str) -> dict:
         raise ValueError(f"Invalid Google token: {e}")
 
 
+async def verify_google_access_token(access_token: str) -> dict:
+    """Verify Google access token via userinfo API."""
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                "https://www.googleapis.com/oauth2/v3/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            resp.raise_for_status()
+            userinfo = resp.json()
+
+        return {
+            "sub": userinfo["sub"],
+            "email": userinfo.get("email", ""),
+            "name": userinfo.get("name", ""),
+            "picture": userinfo.get("picture", ""),
+        }
+    except Exception as e:
+        logger.error("Google access token verification failed: %s", e)
+        raise ValueError(f"Invalid Google access token: {e}")
+
+
 # ──────────────────────────────────────
 # Apple Token Verification
 # ──────────────────────────────────────

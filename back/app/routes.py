@@ -767,10 +767,10 @@ async def _generate_in_background(
             if phase == "extracting":
                 session.progress = 5
             elif phase == "chunked":
-                session.progress = 10
+                session.progress = 15
             elif phase == "generating":
-                # 10~80% 구간: 청크 진행에 비례
-                session.progress = 10 + int(completed_chunks / max(total_chunks, 1) * 70)
+                # 15~85% 구간: 청크 진행에 비례
+                session.progress = 15 + int(completed_chunks / max(total_chunks, 1) * 70)
             elif phase == "reviewing":
                 session.progress = 85
             elif phase == "done":

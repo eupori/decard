@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../utils/snackbar_helper.dart';
+import '../widgets/content_width.dart';
 import 'explore_cardset_screen.dart';
 
 class ExploreCategoryScreen extends StatefulWidget {
@@ -62,7 +63,8 @@ class _ExploreCategoryScreenState extends State<ExploreCategoryScreen> {
 
     return Scaffold(
       appBar: AppBar(title: Text(widget.categoryName)),
-      body: Column(
+      body: ContentWidth(
+        child: Column(
         children: [
           // 정렬 필터
           Padding(
@@ -87,6 +89,7 @@ class _ExploreCategoryScreenState extends State<ExploreCategoryScreen> {
           // 카드셋 리스트
           Expanded(child: _buildBody(cs)),
         ],
+      ),
       ),
     );
   }

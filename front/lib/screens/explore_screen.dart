@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import '../config/responsive.dart';
 import '../services/api_service.dart';
 import '../utils/snackbar_helper.dart';
+import '../widgets/content_width.dart';
 import 'explore_category_screen.dart';
 import 'explore_cardset_screen.dart';
 
@@ -109,7 +111,8 @@ class _ExploreScreenState extends State<ExploreScreen> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('탐색')),
-      body: Column(
+      body: ContentWidth(
+        child: Column(
         children: [
           // 검색바
           Padding(
@@ -145,6 +148,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 : _buildMainContent(cs),
           ),
         ],
+      ),
       ),
     );
   }
@@ -226,7 +230,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: GridView.count(
-                crossAxisCount: 2,
+                crossAxisCount: Responsive.isTablet(context) ? 3 : 2,
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 crossAxisSpacing: 12,

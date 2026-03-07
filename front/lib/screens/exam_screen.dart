@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import '../models/card_model.dart';
 import '../services/api_service.dart';
+import '../widgets/content_width.dart';
 import 'exam_result_screen.dart';
 
 class ExamQuestion {
@@ -393,7 +394,8 @@ class _ExamScreenState extends State<ExamScreen> {
           ],
         ),
         body: SafeArea(
-          child: Column(
+          child: ContentWidth(
+            child: Column(
             children: [
               // 프로그레스 바 + 유형 뱃지
               _buildProgressBar(cs, q, progress, total),
@@ -420,6 +422,7 @@ class _ExamScreenState extends State<ExamScreen> {
               // 하단 버튼
               _buildBottomBar(cs),
             ],
+          ),
           ),
         ),
       ),

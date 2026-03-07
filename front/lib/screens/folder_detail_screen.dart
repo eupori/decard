@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import '../config/responsive.dart';
 import '../models/folder_model.dart';
 import '../services/api_service.dart';
 import '../utils/snackbar_helper.dart';
+import '../widgets/content_width.dart';
 import '../widgets/folder_edit_dialog.dart';
 import '../widgets/session_list_item.dart';
 import 'main_screen.dart' show buildAppBottomNav;
@@ -80,7 +82,7 @@ class _FolderDetailScreenState extends State<FolderDetailScreen> {
     final color = _parseColor(widget.folder.color);
 
     return Scaffold(
-      bottomNavigationBar: buildAppBottomNav(context, selectedIndex: 1),
+      bottomNavigationBar: Responsive.isTablet(context) ? null : buildAppBottomNav(context, selectedIndex: 1),
       appBar: AppBar(
         title: Text(_folderName, style: const TextStyle(fontSize: 16)),
         actions: [
@@ -159,7 +161,8 @@ class _FolderDetailScreenState extends State<FolderDetailScreen> {
       );
     }
 
-    return ListView.builder(
+    return ContentWidth(
+      child: ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       itemCount: _sessions.length,
       itemBuilder: (context, index) {
@@ -180,6 +183,7 @@ class _FolderDetailScreenState extends State<FolderDetailScreen> {
           onRemove: () => _removeSession(session['id'] as String),
         );
       },
+    ),
     );
   }
 

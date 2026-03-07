@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:math';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -102,18 +103,30 @@ class AuthService {
 
   static Future<String?> loginWithGoogle() async {
     try {
-      final googleSignIn = GoogleSignIn(scopes: ['email', 'profile']);
+      final googleSignIn = GoogleSignIn(
+        scopes: ['email', 'profile'],
+        serverClientId: kIsWeb
+            ? null
+            : '374766262600-jqjj2tptpjvk3hktnsrj5mroj2moj0ds.apps.googleusercontent.com',
+      );
       final account = await googleSignIn.signIn();
       if (account == null) return null; // 사용자 취소
 
       final auth = await account.authentication;
       final idToken = auth.idToken;
-      if (idToken == null) return '토큰을 가져올 수 없습니다.';
+      final accessToken = auth.accessToken;
+
+      if (idToken == null && accessToken == null) {
+        return '토큰을 가져올 수 없습니다.';
+      }
 
       final response = await http.post(
         Uri.parse(ApiConfig.googleVerifyUrl),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'id_token': idToken}),
+        body: jsonEncode({
+          if (idToken != null) 'id_token': idToken,
+          if (accessToken != null) 'access_token': accessToken,
+        }),
       );
 
       if (response.statusCode == 200) {
@@ -127,7 +140,7 @@ class AuthService {
         return data['detail'] as String? ?? '로그인에 실패했습니다.';
       }
     } catch (e) {
-      return '로그인 중 오류가 발생했습니다.';
+      return 'Google 로그인 오류: $e';
     }
   }
 

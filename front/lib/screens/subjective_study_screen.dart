@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../models/card_model.dart';
 import '../services/api_service.dart';
 import '../utils/snackbar_helper.dart';
+import '../widgets/content_width.dart';
 import '../widgets/drawing_canvas.dart';
 
 class SubjectiveStudyScreen extends StatefulWidget {
@@ -123,7 +124,8 @@ class _SubjectiveStudyScreenState extends State<SubjectiveStudyScreen> {
         title: Text(widget.title, style: const TextStyle(fontSize: 16)),
       ),
       body: SafeArea(
-        child: Column(
+        child: ContentWidth(
+          child: Column(
           children: [
             // 진행률
             Padding(
@@ -187,6 +189,7 @@ class _SubjectiveStudyScreenState extends State<SubjectiveStudyScreen> {
             // 하단 버튼
             _buildBottomBar(cs),
           ],
+        ),
         ),
       ),
     );

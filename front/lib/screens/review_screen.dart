@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import '../config/responsive.dart';
 import '../config/theme.dart';
 import '../models/session_model.dart';
 import '../models/card_model.dart';
 import '../services/api_service.dart';
 import '../utils/snackbar_helper.dart';
+import '../widgets/content_width.dart';
 import '../widgets/flash_card_item.dart';
 import '../widgets/save_to_library_dialog.dart';
 import 'main_screen.dart' show buildAppBottomNav;
@@ -299,8 +301,9 @@ class _ReviewScreenState extends State<ReviewScreen> {
           ),
         ],
       ),
-      bottomNavigationBar: buildAppBottomNav(context, selectedIndex: 0),
-      body: Column(
+      bottomNavigationBar: Responsive.isTablet(context) ? null : buildAppBottomNav(context, selectedIndex: 0),
+      body: ContentWidth(
+        child: Column(
         children: [
           // 통계 바 (고정)
           _buildStatsBar(cs),
@@ -356,6 +359,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
                   ),
           ),
         ],
+      ),
       ),
     );
   }

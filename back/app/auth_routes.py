@@ -15,6 +15,7 @@ from .auth import (
     find_or_create_user,
     find_or_create_user_by_provider,
     verify_google_token,
+    verify_google_access_token,
     verify_apple_token,
     delete_user_data,
     link_device_sessions,
@@ -140,7 +141,8 @@ def link_device(request: Request, db: Session = Depends(get_db)):
 # ──────────────────────────────────────
 
 class GoogleVerifyRequest(PydanticBaseModel):
-    id_token: str
+    id_token: str | None = None
+    access_token: str | None = None
 
 
 class AppleVerifyRequest(PydanticBaseModel):
@@ -154,9 +156,15 @@ class AppleVerifyRequest(PydanticBaseModel):
 # ──────────────────────────────────────
 
 @router.post("/google/verify")
-def google_verify(body: GoogleVerifyRequest, db: Session = Depends(get_db)):
+async def google_verify(body: GoogleVerifyRequest, db: Session = Depends(get_db)):
+    if not body.id_token and not body.access_token:
+        raise HTTPException(400, "id_token 또는 access_token이 필요합니다.")
+
     try:
-        google_user = verify_google_token(body.id_token)
+        if body.id_token:
+            google_user = verify_google_token(body.id_token)
+        else:
+            google_user = await verify_google_access_token(body.access_token)
     except ValueError as e:
         raise HTTPException(401, str(e))
 

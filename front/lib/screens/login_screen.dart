@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import '../services/auth_service.dart';
 import '../utils/snackbar_helper.dart';
+import '../widgets/content_width.dart';
 import '../utils/web_auth_stub.dart'
     if (dart.library.html) '../utils/web_auth.dart' as web_nav;
 
@@ -26,7 +27,9 @@ class LoginScreen extends StatelessWidget {
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-          child: Column(
+          child: ContentWidth(
+            maxWidth: 420,
+            child: Column(
             children: [
               const SizedBox(height: 24),
 
@@ -112,6 +115,7 @@ class LoginScreen extends StatelessWidget {
                     ),
               ),
             ],
+          ),
           ),
         ),
       ),

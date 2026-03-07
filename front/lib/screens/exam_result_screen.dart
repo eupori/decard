@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/card_model.dart';
 import '../services/exam_history_service.dart';
+import '../widgets/content_width.dart';
 import 'exam_screen.dart';
 
 class ExamResult {
@@ -118,7 +119,8 @@ class _ExamResultScreenState extends State<ExamResultScreen> {
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
-        child: Column(
+        child: ContentWidth(
+          child: Column(
           children: [
             // 1. 상단 원형 점수
             const SizedBox(height: 12),
@@ -250,6 +252,7 @@ class _ExamResultScreenState extends State<ExamResultScreen> {
 
             const SizedBox(height: 20),
           ],
+        ),
         ),
       ),
     );

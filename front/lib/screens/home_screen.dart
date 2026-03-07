@@ -14,6 +14,7 @@ import '../widgets/session_list_item.dart';
 import '../utils/web_auth_stub.dart'
     if (dart.library.html) '../utils/web_auth.dart' as web_auth;
 import '../models/card_model.dart';
+import '../widgets/content_width.dart';
 import 'login_screen.dart';
 import 'main_screen.dart' show hideBottomNav, mainTabIndex;
 import 'manual_create_screen.dart';
@@ -288,23 +289,25 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted && _waitingHere) {
         _elapsedSeconds++;
         setState(() {
-          // 서버 진행률이 있으면 그걸 사용 (0~100 → 0.0~1.0)
-          if (_serverProgress > 0) {
-            final serverP = _serverProgress / 100.0;
-            // 서버 진행률과 현재 표시값 중 더 큰 쪽 사용 (역행 방지)
-            _progress = _progress > serverP ? _progress : serverP;
-            // 100%가 아니면 99%까지만
-            if (_progress >= 1.0 && _serverProgress < 100) _progress = 0.99;
+          // 시간 기반 점근적 진행률 (항상 계산)
+          double timeP;
+          final linear = (_elapsedSeconds / _estimatedSeconds).clamp(0.0, 0.8);
+          if (linear < 0.8) {
+            timeP = linear;
           } else {
-            // 서버 진행률 없을 때: 기존 점근적 방식
-            final linear = (_elapsedSeconds / _estimatedSeconds).clamp(0.0, 0.8);
-            if (linear < 0.8) {
-              _progress = linear;
-            } else {
-              final overtime = _elapsedSeconds - (_estimatedSeconds * 0.8).toInt();
-              _progress = 0.8 + 0.19 * (1 - 1 / (1 + overtime / 60.0));
-            }
+            final overtime = _elapsedSeconds - (_estimatedSeconds * 0.8).toInt();
+            timeP = 0.8 + 0.19 * (1 - 1 / (1 + overtime / 60.0));
           }
+
+          // 서버 진행률 (0~100 → 0.0~1.0)
+          final serverP = _serverProgress / 100.0;
+
+          // 서버값과 시간 기반 중 더 큰 값 사용 → 정체 방지 + 역행 방지
+          final candidate = serverP > timeP ? serverP : timeP;
+          _progress = _progress > candidate ? _progress : candidate;
+
+          // 100%가 아니면 99%까지만
+          if (_progress >= 1.0 && _serverProgress < 100) _progress = 0.99;
         });
       }
     });
@@ -336,7 +339,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _pollUntilDone() async {
     while (mounted && _waitingHere && _generatedSessionId != null) {
-      await Future.delayed(const Duration(seconds: 5));
+      await Future.delayed(const Duration(seconds: 2));
       if (!mounted || !_waitingHere) return;
 
       try {
@@ -1065,7 +1068,8 @@ class _HomeScreenState extends State<HomeScreen> {
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-        child: Column(
+        child: ContentWidth(
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // 상단 바: 가이드 + 다크모드 토글 + 로그인/프로필
@@ -1396,6 +1400,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
             const SizedBox(height: 24),
           ],
+        ),
         ),
       ),
     );
