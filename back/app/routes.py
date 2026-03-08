@@ -2,6 +2,7 @@ import asyncio
 import csv
 import io
 import logging
+import re
 from datetime import timedelta
 from typing import Optional
 
@@ -89,7 +90,7 @@ async def generate(
 
     # 세션 생성 (즉시 반환 — 텍스트 추출은 백그라운드에서)
     session = SessionModel(
-        filename=file.filename or "unknown.pdf",
+        filename=re.sub(r'<[^>]+>', '', file.filename or "unknown.pdf"),
         page_count=0,
         template_type=template_type,
         device_id=device_id,

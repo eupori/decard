@@ -71,8 +71,11 @@ async def run_claude(
 
     cmd = ["claude", "-p", "--output-format", "json", "--permission-mode", "default"]
 
+    # --system-prompt 플래그는 빈 result를 빈번하게 반환하는 이슈가 있어
+    # system prompt를 user prompt 앞에 임베드하는 방식으로 통일
     if system_prompt:
-        cmd += ["--system-prompt", system_prompt]
+        user_prompt = system_prompt + "\n\n---\n\n" + user_prompt
+
     if model:
         cmd += ["--model", model]
 

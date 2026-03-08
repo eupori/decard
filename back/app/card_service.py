@@ -216,23 +216,14 @@ async def _generate_chunk(
     last_error = None
     raw_text = ""
     cards_raw = []
-    empty_result_count = 0  # 빈 result 반환 횟수 추적
     for attempt in range(MAX_RETRIES):
         try:
-            # 빈 result 2회 이상 → --system-prompt 대신 user prompt에 임베드 (폴백)
-            if empty_result_count >= 2:
-                logger.info("청크 #%d 폴백: system prompt를 user prompt에 임베드 (시도 %d)", chunk_idx, attempt + 1)
-                combined_prompt = system_prompt + "\n\n---\n\n" + user_prompt
-                raw_text = await run_claude("", combined_prompt, model=settings.LLM_MODEL, session_id=session_id)
-            else:
-                raw_text = await run_claude(system_prompt, user_prompt, model=settings.LLM_MODEL, session_id=session_id)
+            raw_text = await run_claude(system_prompt, user_prompt, model=settings.LLM_MODEL, session_id=session_id)
             cards_raw = _parse_cards_json(raw_text)
             logger.info("청크 #%d 파싱 성공 (시도 %d): %d장", chunk_idx, attempt + 1, len(cards_raw))
             break
         except RuntimeError as e:
             last_error = e
-            if "빈 result" in str(e):
-                empty_result_count += 1
             if attempt < MAX_RETRIES - 1:
                 delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
                 logger.warning("청크 #%d 오류 (시도 %d/%d, %ds 후): %s: %s",
