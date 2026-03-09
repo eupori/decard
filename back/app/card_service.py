@@ -472,46 +472,50 @@ async def generate_cards(
     target_cards = min(target_cards, MAX_CARDS)
     logger.info("초기 생성: %d장, 목표: %d장", len(result), target_cards)
 
-    # 품질 검수 반복 루프
+    # 품질 검수 — 초기 생성이 목표의 80% 이상이면 검수 생략 (서버 부하 절감)
     if on_progress:
         await on_progress(completed_chunks=total_chunks, total_chunks=total_chunks, phase="reviewing")
 
-    all_passed = []
-    current_cards = result
+    skip_review = len(result) >= target_cards * 0.8
+    if skip_review:
+        logger.info("초기 생성 %d장 ≥ 목표의 80%% (%d장), 검수 생략", len(result), int(target_cards * 0.8))
+    else:
+        all_passed = []
+        current_cards = result
 
-    for round_num in range(MAX_REVIEW_ROUNDS):
-        passed, failed = await _review_cards(current_cards, session_id=session_id)
-        all_passed.extend(passed)
+        for round_num in range(MAX_REVIEW_ROUNDS):
+            passed, failed = await _review_cards(current_cards, session_id=session_id)
+            all_passed.extend(passed)
 
-        pass_rate = len(passed) / len(current_cards) if current_cards else 1.0
-        logger.info(
-            "검수 %d회차: %d장 중 %d장 통과 (%.0f%%), 누적 통과: %d장",
-            round_num + 1, len(current_cards), len(passed),
-            pass_rate * 100, len(all_passed),
-        )
+            pass_rate = len(passed) / len(current_cards) if current_cards else 1.0
+            logger.info(
+                "검수 %d회차: %d장 중 %d장 통과 (%.0f%%), 누적 통과: %d장",
+                round_num + 1, len(current_cards), len(passed),
+                pass_rate * 100, len(all_passed),
+            )
 
-        # 통과율 충분하거나 목표 달성 시 종료
-        if pass_rate >= REVIEW_PASS_THRESHOLD or len(all_passed) >= target_cards:
-            break
+            # 통과율 충분하거나 목표 달성 시 종료
+            if pass_rate >= REVIEW_PASS_THRESHOLD or len(all_passed) >= target_cards:
+                break
 
-        # 마지막 회차면 추가 생성 없이 종료
-        if round_num >= MAX_REVIEW_ROUNDS - 1:
-            break
+            # 마지막 회차면 추가 생성 없이 종료
+            if round_num >= MAX_REVIEW_ROUNDS - 1:
+                break
 
-        # 부족분 추가 생성
-        deficit = target_cards - len(all_passed)
-        if deficit <= 0:
-            break
+            # 부족분 추가 생성
+            deficit = target_cards - len(all_passed)
+            if deficit <= 0:
+                break
 
-        current_cards = await _generate_supplemental(
-            pages, template_type, all_passed, failed, deficit,
-            session_id=session_id,
-        )
-        if not current_cards:
-            logger.warning("추가 생성 결과 0장, 검수 루프 종료")
-            break
+            current_cards = await _generate_supplemental(
+                pages, template_type, all_passed, failed, deficit,
+                session_id=session_id,
+            )
+            if not current_cards:
+                logger.warning("추가 생성 결과 0장, 검수 루프 종료")
+                break
 
-    result = all_passed
+        result = all_passed
 
     # MAX_CARDS 초과 시 truncate
     if len(result) > MAX_CARDS:

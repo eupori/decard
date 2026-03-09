@@ -6,7 +6,7 @@ class Settings(BaseSettings):
 
     # Claude Code CLI
     LLM_MODEL: str = "claude-sonnet-4-5-20250929"
-    CLAUDE_TIMEOUT_SECONDS: int = 180
+    CLAUDE_TIMEOUT_SECONDS: int = 240
 
     # Database
     DATABASE_URL: str = "sqlite:///./decard.db"
