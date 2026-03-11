@@ -42,9 +42,6 @@ class Settings(BaseSettings):
     # Frontend
     FRONTEND_URL: str = "http://localhost:8080"
 
-    # Docling (수학 PDF)
-    USE_DOCLING: bool = True
-
     # Concurrency
     MAX_CONCURRENT_CLI: int = 3
     MAX_CLI_PER_SESSION: int = 2

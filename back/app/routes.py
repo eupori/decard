@@ -808,6 +808,7 @@ async def _generate_in_background(
             pages, template_type,
             session_id=session_id,
             on_progress=_update_progress,
+            is_math=extraction.get("is_math", False),
         )
 
         for card_data in cards_data:

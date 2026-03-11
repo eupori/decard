@@ -60,12 +60,44 @@ TEMPLATE_INSTRUCTIONS = {
 }
 
 
-def _build_system_prompt(template_type: str) -> str:
+def _build_system_prompt(template_type: str, is_math: bool = False) -> str:
     template_guide = TEMPLATE_INSTRUCTIONS.get(template_type, TEMPLATE_INSTRUCTIONS["definition"])
+
+    math_section = ""
+    if is_math:
+        math_section = """
+## 수학 수식 복원 (매우 중요)
+
+이 텍스트는 PDF에서 자동 추출된 것으로, **수학 공식이 깨져 있을 수 있습니다.**
+아래 패턴을 인식하고 정확한 수학 표기로 복원하세요:
+
+**접합 단어 복원:**
+- "Orthogonalmatrix" → "Orthogonal matrix"
+- "A3-dimensionalvectorv" → "A 3-dimensional vector v"
+- "0fori > j" → "0 for i > j"
+
+**수식 기호 복원:**
+- "QTQ=I" → "Q^T Q = I" (T는 전치 행렬)
+- "R ij" → "R_{ij}" (아래첨자)
+- "x2" 또는 "x 2" (문맥상 제곱) → "x²" 또는 "x^2"
+- "Anx = λnx" → "A^n x = λ^n x"
+- "UΣVT" → "UΣV^T"
+- "v1,v2,v3" → "v₁, v₂, v₃"
+
+**행렬/벡터 복원:**
+- 공백으로 흩어진 숫자 행 ("3 2 5 / 4 0 4") → 행렬 원소로 해석
+- 중괄호, 대괄호가 누락된 벡터 표기 복원
+
+**카드 작성 시 수식 표기:**
+- 간단한 수식: 유니코드 사용 (², ³, ₁, ₂, →, ≤, ≥, ≠, ∈, ∀, ∃)
+- 복잡한 수식: LaTeX 표기 사용 (예: "∫₀¹ f(x)dx", "Σᵢ₌₁ⁿ aᵢ")
+- 행렬: 텍스트로 명확하게 설명 (예: "[1 2; 3 4]는 2×2 행렬")
+
+"""
 
     return f"""당신은 시험 출제 경력 20년의 대학 교수입니다.
 학생이 제출한 강의자료(PDF)를 읽고, 시험에 출제할 암기카드를 만들어야 합니다.
-
+{math_section}
 ## 작업 순서 (반드시 이 순서로 사고하세요)
 
 ### 1단계: 내용 분석
@@ -204,9 +236,10 @@ RETRY_DELAYS = [2, 5, 10]  # 재시도 간 대기 (초)
 async def _generate_chunk(
     pages: List[Dict], template_type: str,
     chunk_idx: int = 0, session_id: str | None = None,
+    is_math: bool = False,
 ) -> List[Dict]:
     """페이지 청크 하나에 대해 카드를 생성합니다. 실패 시 지수 백오프로 재시도."""
-    system_prompt = _build_system_prompt(template_type)
+    system_prompt = _build_system_prompt(template_type, is_math=is_math)
     user_prompt = _build_user_prompt(pages)
 
     page_nums = [p["page_num"] for p in pages]
@@ -399,6 +432,7 @@ async def generate_cards(
     template_type: str = "definition",
     session_id: str | None = None,
     on_progress=None,
+    is_math: bool = False,
 ) -> List[Dict]:
     """PDF 텍스트에서 Claude를 이용해 암기카드를 생성합니다. 청크 병렬 처리 + 3단계 검수."""
     total_text_len = sum(len(p["text"]) for p in pages)
@@ -425,7 +459,7 @@ async def generate_cards(
         await on_progress(completed_chunks=0, total_chunks=total_chunks, phase="generating")
 
     if total_chunks == 1:
-        result = await _generate_chunk(chunks_list[0], template_type, chunk_idx=0, session_id=session_id)
+        result = await _generate_chunk(chunks_list[0], template_type, chunk_idx=0, session_id=session_id, is_math=is_math)
         if on_progress:
             await on_progress(completed_chunks=1, total_chunks=total_chunks, phase="generating")
     else:
@@ -438,7 +472,7 @@ async def generate_cards(
         async def _chunk_with_progress(chunk, idx):
             nonlocal _completed_count, failed_chunks
             try:
-                cards = await _generate_chunk(chunk, template_type, chunk_idx=idx, session_id=session_id)
+                cards = await _generate_chunk(chunk, template_type, chunk_idx=idx, session_id=session_id, is_math=is_math)
                 logger.info("청크 #%d 결과: %d장", idx, len(cards))
                 return cards
             except Exception as e:
