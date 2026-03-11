@@ -12,9 +12,13 @@ services:
       - SESSION_TIMEOUT_MINUTES=15
     volumes:
       - ./data:/app/data
+      - docling-models:/home/appuser/.cache  # Docling/HuggingFace 모델 캐시
     restart: always
-    mem_limit: 1536m
-    memswap_limit: 2g
+    mem_limit: 3072m
+    memswap_limit: 4g
+
+volumes:
+  docling-models:
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
       interval: 30s
