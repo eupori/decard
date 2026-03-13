@@ -59,13 +59,7 @@ TEMPLATE_INSTRUCTIONS = {
 """,
 }
 
-
-def _build_system_prompt(template_type: str, is_math: bool = False) -> str:
-    template_guide = TEMPLATE_INSTRUCTIONS.get(template_type, TEMPLATE_INSTRUCTIONS["definition"])
-
-    math_section = ""
-    if is_math:
-        math_section = """
+MATH_SECTION = """
 ## 수학 수식 복원 (매우 중요)
 
 이 텍스트는 PDF에서 자동 추출된 것으로, **수학 공식이 깨져 있을 수 있습니다.**
@@ -95,66 +89,137 @@ def _build_system_prompt(template_type: str, is_math: bool = False) -> str:
 
 """
 
-    return f"""당신은 시험 출제 경력 20년의 대학 교수입니다.
-학생이 제출한 강의자료(PDF)를 읽고, 시험에 출제할 암기카드를 만들어야 합니다.
-{math_section}
-## 작업 순서 (반드시 이 순서로 사고하세요)
 
-### 1단계: 내용 분석
-텍스트를 꼼꼼히 읽고 아래를 파악하세요:
-- 이 자료의 **주제와 학습 목표**는 무엇인가?
-- **핵심 개념, 정의, 이론, 분류, 수치, 인물, 공식**은 무엇인가?
-- 개념 간 **관계, 비교, 인과관계**는 무엇인가?
-- 텍스트가 슬라이드/요약형이면 키워드에서 **숨겨진 의미**를 추론하세요.
+# ── Step 2: 내용 분석 프롬프트 ──
+
+def _build_analysis_prompt(is_math: bool = False) -> str:
+    """5관점 통합 분석 시스템 프롬프트"""
+    math_section = MATH_SECTION if is_math else ""
+
+    return f"""당신은 5가지 전문가 관점을 통합한 학습 콘텐츠 분석가입니다.
+{math_section}
+## 분석 관점
+
+### 1. 교수 관점 (출제자)
+- 시험에 반드시 나올 핵심 개념/정의/공식
+- "이건 시험에 낸다" 수준의 중요도 판별
+- 학생들이 자주 틀리는 함정 포인트
+
+### 2. 전공 교재 관점 (학문적 정확성)
+- 용어의 정확한 학술적 정의
+- 개념 간 위계 구조와 선후 관계
+- 전공 분야에서 합의된 핵심 원리
+
+### 3. 유명 강사 관점 (설명력)
+- 복잡한 개념을 쉽게 풀어내는 핵심 비유/예시
+- "이것만 기억하면 된다" 식의 압축 포인트
+- 학생 눈높이의 설명 방식
+
+### 4. 문제 출제자 관점 (변별력)
+- 헷갈리기 쉬운 유사 개념 쌍 (비교형 적합)
+- 빈칸으로 만들었을 때 답이 하나로 특정되는 핵심 용어
+- 단계/분류/유형을 묻는 포인트
+
+### 5. 학생 관점 (학습 효율)
+- 이해하기 어려운 부분 (추가 설명 필요)
+- 암기 부담이 큰 항목 (니모닉/연상 가능?)
+- 실제 시험에서 시간 압박 하에 떠올릴 수 있는 수준
+
+## 분석 지침
 - **손글씨 메모/필기**가 있으면 강의 보충 자료로 간주하고 적극 분석하세요.
   (단, 낙서·낙서체·학습과 무관한 메모는 무시)
+- 텍스트가 슬라이드/요약형이면 키워드에서 **숨겨진 의미**를 추론하세요.
+- 표지, 목차만 있는 경우 빈 결과를 반환하세요.
 
-### 2단계: 출제 포인트 선정
-분석한 내용에서 **시험에 나올 수 있는 모든 포인트**를 선정하세요:
-- 정의를 묻는 문제 (개념, 용어)
-- 비교/구분 문제 (유사 개념 간 차이)
-- 적용/사례 문제 (이론을 실제에 적용)
-- 수치/분류 문제 (단계, 유형, 숫자)
-- 하나의 개념에서도 **여러 각도**로 출제 가능하면 여러 카드를 만드세요.
+## 출력 형식 (가장 중요)
+반드시 JSON만 출력하세요. 다른 텍스트, 설명, 마크다운을 추가하지 마세요.
+계획을 작성하지 마세요. 질문하지 마세요. 첫 글자가 반드시 `{{` 이어야 합니다.
 
-### 3단계: 카드 작성
+{{
+  "subject": "과목/단원명",
+  "key_concepts": [
+    {{
+      "concept": "개념명",
+      "definition": "정확한 정의 (교재 관점)",
+      "why_important": "왜 시험에 나오는지 (교수 관점)",
+      "exam_type": "definition|cloze|comparison",
+      "confusion_pairs": ["혼동되는 개념"],
+      "key_terms": ["빈칸 적합 핵심 용어"],
+      "simple_explanation": "쉬운 설명 (강사 관점)",
+      "source_page": 페이지번호,
+      "evidence": "원문 근거"
+    }}
+  ],
+  "comparison_pairs": [
+    {{
+      "concept_a": "A",
+      "concept_b": "B",
+      "key_differences": ["차이점1", "차이점2"],
+      "source_page": 페이지번호
+    }}
+  ],
+  "cloze_candidates": [
+    {{
+      "sentence": "빈칸으로 만들 원문 문장",
+      "blank_term": "빈칸 정답 (핵심 용어만)",
+      "source_page": 페이지번호
+    }}
+  ]
+}}"""
+
+
+# ── Step 3: 카드 생성 프롬프트 ──
+
+def _build_card_creation_prompt(template_type: str) -> str:
+    """분석 기반 카드 생성 시스템 프롬프트"""
+    template_guide = TEMPLATE_INSTRUCTIONS.get(template_type, TEMPLATE_INSTRUCTIONS["definition"])
+
+    return f"""당신은 최적의 암기카드를 만드는 전문가입니다.
+
+## 입력
+1. 전문가 분석 결과 (JSON) — 5관점 통합 분석
+2. 원문 텍스트 — 근거 확인용
+
+## Wozniak의 효과적 학습카드 원칙
+- **최소 정보 원칙**: 한 카드 = 한 개념. 복합 질문 금지
+- **빈칸 삭제 우선**: 문장 속 핵심 용어를 빈칸으로 → 문맥 기억 강화
+- **중복 허용**: 같은 개념을 다른 각도(정의/빈칸/비교)로 물으면 기억 강화
+- **구체적 질문**: "설명하시오" 대신 "X의 3가지 특징은?"
+
+## 템플릿 규칙
 
 {template_guide}
 
-### 4단계: 채택 판단 (recommend 필드)
-
-모든 카드를 만든 후, 각 카드에 아래 기준으로 가중치를 매겨 recommend 값을 결정하세요.
-
-**가중치 판단 기준:**
-- **출제 가능성**: 시험에 실제로 나올 확률이 높은가? (핵심 개념 > 세부 사항)
-- **학습 효율**: 이 카드를 암기하면 시험 점수에 직접 도움이 되는가?
-- **개념 핵심도**: 해당 과목/단원의 뼈대가 되는 개념인가, 보충 설명인가?
-- **독립성**: 다른 카드와 중복되거나 지나치게 유사하지 않은가?
-
-**결정 기준:**
-- recommend: true → 위 기준에서 **2개 이상 해당**하는 핵심 카드
-- recommend: false → 보충 학습용, 세부사항, 또는 다른 카드와 유사한 카드
-- 전체 카드 중 **60~75%** 를 recommend: true로 설정하세요.
-  (전부 true거나 전부 false면 판단이 잘못된 것입니다)
-
-## 생성 규칙
+## 카드 생성 규칙
 
 1. **근거 필수**: 원문에서 발췌한 근거(evidence)를 1~2문장으로 포함. 근거 없는 카드는 만들지 마세요.
 2. **페이지 번호 필수**: 근거의 출처 페이지를 정확히 표기.
 3. **한 카드 = 한 개념**: 하나의 카드는 하나의 개념만 테스트.
 4. **언어**: 원문 언어와 동일하게 작성 (한국어 원문 → 한국어 카드).
-5. **카드 수**: 페이지당 4~7장의 카드를 만드세요. 내용이 풍부한 페이지는 7장 이상도 가능합니다.
+5. **카드 수**: 분석의 key_concepts 각각 최소 1장. 페이지당 4~7장.
    텍스트가 짧아도(슬라이드, 요약, 필기) 개념이 있으면 반드시 카드를 만드세요.
 6. **난이도 태그**: easy(기본 개념), medium(응용), hard(심화/비교).
 
+## 채택 판단 (recommend 필드)
+
+분석에서 why_important가 강한 개념 → recommend: true
+**가중치 판단 기준:**
+- **출제 가능성**: 시험에 실제로 나올 확률이 높은가?
+- **학습 효율**: 이 카드를 암기하면 시험 점수에 직접 도움이 되는가?
+- **개념 핵심도**: 해당 과목/단원의 뼈대가 되는 개념인가?
+- **독립성**: 다른 카드와 중복되거나 지나치게 유사하지 않은가?
+- recommend: true → 위 기준에서 2개 이상 해당하는 핵심 카드
+- recommend: false → 보충 학습용, 세부사항, 또는 다른 카드와 유사한 카드
+- 전체 카드 중 **60~75%** 를 recommend: true로 설정하세요.
+
 ## 자체 검수 (출력 전 필수)
 
-모든 카드를 아래 기준으로 검수하세요:
-- 원문 근거와 **사실적으로 일치**하는가?
+출력 전 모든 카드를 검수하세요:
+- 원문 evidence와 **사실적으로 일치**하는가?
 - 답이 **학술적으로 정확**한가?
-- 질문이 **명확하고 모호하지 않은가**?
-- 원문에 없는 내용을 **지어낸 것은 아닌가**?
-- 부정확한 카드 → 수정, 근거 없는 카드 → 제외
+- 빈칸형: 정답이 하나로 특정되는가? 핵심 용어인가?
+- 비교형: 실제로 헷갈리는 쌍인가?
+- 부정확한 카드 → 수정 또는 제외
 
 ## 출력 형식 (가장 중요)
 
@@ -185,6 +250,33 @@ def _build_user_prompt(pages: List[Dict]) -> str:
     for page in pages:
         parts.append(f"=== 페이지 {page['page_num']} ===\n{page['text']}")
     return "\n\n".join(parts)
+
+
+def _parse_analysis_json(text: str) -> dict:
+    """분석 결과 JSON 파싱 (key_concepts, comparison_pairs, cloze_candidates)"""
+    content = text.strip()
+
+    if "```json" in content:
+        content = content.split("```json", 1)[1].split("```", 1)[0]
+    elif "```" in content:
+        content = content.split("```", 1)[1].split("```", 1)[0]
+
+    start = content.find("{")
+    end = content.rfind("}")
+    if start == -1 or end == -1:
+        raise ValueError("분석 JSON 객체를 찾을 수 없습니다.")
+
+    result = json.loads(content[start:end + 1])
+
+    # 최소 구조 검증
+    if "key_concepts" not in result:
+        result["key_concepts"] = []
+    if "comparison_pairs" not in result:
+        result["comparison_pairs"] = []
+    if "cloze_candidates" not in result:
+        result["cloze_candidates"] = []
+
+    return result
 
 
 def _parse_cards_json(text: str) -> List[Dict]:
@@ -233,198 +325,143 @@ MAX_RETRIES = 3  # 최초 1회 + 재시도 2회
 RETRY_DELAYS = [2, 5, 10]  # 재시도 간 대기 (초)
 
 
+async def _run_cli_with_retry(
+    system_prompt: str, user_prompt: str,
+    chunk_idx: int, step_name: str,
+    session_id: str | None = None,
+) -> str:
+    """CLI 호출 + 재시도 공통 로직. 원본 텍스트 반환."""
+    last_error = None
+    raw_text = ""
+    for attempt in range(MAX_RETRIES):
+        try:
+            raw_text = await run_claude(system_prompt, user_prompt, model=settings.LLM_MODEL, session_id=session_id)
+            if not raw_text or not raw_text.strip():
+                raise ValueError("빈 응답")
+            return raw_text
+        except Exception as e:
+            last_error = e
+            if attempt < MAX_RETRIES - 1:
+                delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+                logger.warning("청크 #%d %s 오류 (시도 %d/%d, %ds 후): %s: %s",
+                               chunk_idx, step_name, attempt + 1, MAX_RETRIES, delay, type(e).__name__, e)
+                await asyncio.sleep(delay)
+            else:
+                logger.error("청크 #%d %s 최종 실패: %s: %s", chunk_idx, step_name, type(e).__name__, e)
+                raise
+    raise last_error  # unreachable but satisfies type checker
+
+
+async def _analyze_chunk(
+    pages: List[Dict], chunk_idx: int,
+    session_id: str | None = None, is_math: bool = False,
+) -> dict:
+    """Step 2: 5관점 통합 분석 (CLI 1회)"""
+    system_prompt = _build_analysis_prompt(is_math=is_math)
+    user_prompt = _build_user_prompt(pages)
+
+    page_nums = [p["page_num"] for p in pages]
+    total_text_len = sum(len(p["text"]) for p in pages)
+    logger.info("청크 #%d 분석 시작: pages=%s, 텍스트=%d자", chunk_idx, page_nums, total_text_len)
+
+    raw_text = await _run_cli_with_retry(system_prompt, user_prompt, chunk_idx, "분석", session_id=session_id)
+
+    # JSON 파싱 재시도
+    last_error = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            analysis = _parse_analysis_json(raw_text)
+            concept_count = len(analysis.get("key_concepts", []))
+            comparison_count = len(analysis.get("comparison_pairs", []))
+            cloze_count = len(analysis.get("cloze_candidates", []))
+            logger.info("청크 #%d 분석 완료: 핵심개념 %d개, 비교쌍 %d개, 빈칸후보 %d개",
+                        chunk_idx, concept_count, comparison_count, cloze_count)
+            return analysis
+        except (ValueError, json.JSONDecodeError) as e:
+            last_error = e
+            if attempt < MAX_RETRIES - 1:
+                delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+                logger.warning("청크 #%d 분석 JSON 파싱 실패 (시도 %d/%d, %ds 후): %s | 앞 300자: %s",
+                               chunk_idx, attempt + 1, MAX_RETRIES, delay, e, raw_text[:300])
+                await asyncio.sleep(delay)
+                # CLI 재호출
+                raw_text = await _run_cli_with_retry(system_prompt, user_prompt, chunk_idx, "분석(재)", session_id=session_id)
+            else:
+                logger.error("청크 #%d 분석 JSON 최종 실패: %s | 앞 500자: %s", chunk_idx, e, raw_text[:500])
+                raise
+    raise last_error
+
+
+async def _create_cards_from_analysis(
+    analysis: dict, pages: List[Dict],
+    template_type: str, chunk_idx: int,
+    session_id: str | None = None,
+) -> List[Dict]:
+    """Step 3: 분석 기반 카드 생성 (CLI 1회)"""
+    system_prompt = _build_card_creation_prompt(template_type)
+
+    # 분석 JSON + 원문을 함께 전달
+    source_text = _build_user_prompt(pages)
+    analysis_text = json.dumps(analysis, ensure_ascii=False, indent=2)
+
+    user_prompt = f"""## 전문가 분석 결과
+{analysis_text}
+
+## 원문 텍스트 (근거 확인용)
+{source_text}"""
+
+    logger.info("청크 #%d 카드 생성 시작: 분석 기반", chunk_idx)
+
+    raw_text = await _run_cli_with_retry(system_prompt, user_prompt, chunk_idx, "카드생성", session_id=session_id)
+
+    # JSON 파싱 재시도
+    last_error = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            cards_raw = _parse_cards_json(raw_text)
+            logger.info("청크 #%d 카드 파싱 성공: %d장", chunk_idx, len(cards_raw))
+            return _validate_cards(cards_raw, template_type)
+        except (ValueError, json.JSONDecodeError) as e:
+            last_error = e
+            if attempt < MAX_RETRIES - 1:
+                delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+                logger.warning("청크 #%d 카드 JSON 파싱 실패 (시도 %d/%d, %ds 후): %s | 앞 300자: %s",
+                               chunk_idx, attempt + 1, MAX_RETRIES, delay, e, raw_text[:300])
+                await asyncio.sleep(delay)
+                raw_text = await _run_cli_with_retry(system_prompt, user_prompt, chunk_idx, "카드생성(재)", session_id=session_id)
+            else:
+                logger.error("청크 #%d 카드 JSON 최종 실패: %s | 앞 500자: %s", chunk_idx, e, raw_text[:500])
+                raise
+    raise last_error
+
+
 async def _generate_chunk(
     pages: List[Dict], template_type: str,
     chunk_idx: int = 0, session_id: str | None = None,
     is_math: bool = False,
 ) -> List[Dict]:
-    """페이지 청크 하나에 대해 카드를 생성합니다. 실패 시 지수 백오프로 재시도."""
-    system_prompt = _build_system_prompt(template_type, is_math=is_math)
-    user_prompt = _build_user_prompt(pages)
+    """3단계 파이프라인: 분석(CLI 1회) → 카드 생성(CLI 1회). 검수는 카드 생성 프롬프트에 내장."""
+    # Step 2: 내용 분석
+    analysis = await _analyze_chunk(pages, chunk_idx, session_id=session_id, is_math=is_math)
 
-    page_nums = [p["page_num"] for p in pages]
-    total_text_len = sum(len(p["text"]) for p in pages)
-    logger.info("청크 #%d 시작: pages=%s, 텍스트=%d자", chunk_idx, page_nums, total_text_len)
-
-    last_error = None
-    raw_text = ""
-    cards_raw = []
-    for attempt in range(MAX_RETRIES):
-        try:
-            raw_text = await run_claude(system_prompt, user_prompt, model=settings.LLM_MODEL, session_id=session_id)
-            cards_raw = _parse_cards_json(raw_text)
-            logger.info("청크 #%d 파싱 성공 (시도 %d): %d장", chunk_idx, attempt + 1, len(cards_raw))
-            break
-        except RuntimeError as e:
-            last_error = e
-            if attempt < MAX_RETRIES - 1:
-                delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
-                logger.warning("청크 #%d 오류 (시도 %d/%d, %ds 후): %s: %s",
-                               chunk_idx, attempt + 1, MAX_RETRIES, delay, type(e).__name__, e)
-                await asyncio.sleep(delay)
-            else:
-                logger.error("청크 #%d 최종 실패: %s: %s", chunk_idx, type(e).__name__, e)
-                raise
-        except (ValueError, json.JSONDecodeError) as e:
-            last_error = e
-            if attempt < MAX_RETRIES - 1:
-                delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
-                logger.warning("청크 #%d JSON 파싱 실패 (시도 %d/%d, %ds 후): %s | 응답 앞 300자: %s",
-                               chunk_idx, attempt + 1, MAX_RETRIES, delay, e, raw_text[:300])
-                await asyncio.sleep(delay)
-            else:
-                logger.error("청크 #%d JSON 파싱 최종 실패: %s | 응답 앞 500자: %s", chunk_idx, e, raw_text[:500])
-                raise
-        except Exception as e:
-            last_error = e
-            if attempt < MAX_RETRIES - 1:
-                delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
-                logger.warning("청크 #%d 오류 (시도 %d/%d, %ds 후): %s: %s",
-                               chunk_idx, attempt + 1, MAX_RETRIES, delay, type(e).__name__, e)
-                await asyncio.sleep(delay)
-            else:
-                logger.error("청크 #%d 최종 실패: %s: %s", chunk_idx, type(e).__name__, e)
-                raise
-
-    validated = _validate_cards(cards_raw, template_type)
-
-    if not validated and cards_raw:
-        logger.warning("청크 #%d: 파싱된 %d장 중 검증 통과 0장", chunk_idx, len(cards_raw))
-    elif not validated:
-        logger.warning("청크 #%d: 카드 0장 생성됨 (빈 응답)", chunk_idx)
-
-    logger.info("청크 #%d 완료: %d장 검증 통과", chunk_idx, len(validated))
-    return validated
-
-
-async def _review_cards(cards: List[Dict], session_id: str | None = None) -> tuple:
-    """카드 품질 검수. (통과 리스트, [(실패 카드, 사유)] 리스트) 반환."""
-    if not cards:
-        return [], []
-
-    cards_for_review = []
-    for i, card in enumerate(cards):
-        cards_for_review.append({
-            "index": i,
-            "front": card["front"],
-            "back": card["back"],
-            "evidence": card["evidence"],
-            "template_type": card.get("template_type", "definition"),
-        })
-
-    review_user_prompt = f"""아래 시험 암기카드 {len(cards)}장을 품질 기준에 따라 판정하세요.
-
-## 검수 기준
-
-[PASS] 통과:
-- 원문 근거와 사실적으로 일치
-- 질문이 명확하고 답이 하나로 특정됨
-- 시험에 출제할 만한 의미 있는 내용
-
-[FAIL] 제외 (명확한 결함이 있는 경우에만):
-- 원문에 없는 내용을 지어냄 (환각)
-- 답이 여러 개 가능한 모호한 질문
-- 빈칸형에서 일반 조사/동사를 빈칸으로 만듦
-- 다른 카드와 거의 동일한 중복 카드
-- 근거(evidence)가 빈 문자열이거나 답과 무관
-
-## 중요: 판정 비율 가이드
-- 대부분의 카드는 통과해야 합니다. 제외는 명확한 결함이 있는 경우에만 하세요.
-- 전체 카드의 80~95%가 PASS여야 정상입니다.
-- 50% 이상 FAIL이면 판정이 너무 엄격한 것입니다.
-
-## 카드 목록
-{json.dumps(cards_for_review, ensure_ascii=False, indent=2)}
-
-## 출력 형식 (가장 중요)
-반드시 JSON 배열만 출력하세요. 다른 텍스트, 설명, 마크다운을 추가하지 마세요.
-계획을 작성하지 마세요. 질문하지 마세요. 첫 글자가 반드시 `[` 이어야 합니다.
-[
-  {{"index": 0, "verdict": "pass"}},
-  {{"index": 1, "verdict": "fail", "reason": "사유 한 줄"}}
-]"""
-
-    review_system = "당신은 시험 카드 품질 검수 전문가입니다. 지시에 따라 각 카드를 판정하고 JSON 배열만 출력하세요. 계획(Plan)을 작성하지 마세요. 질문하지 마세요. 첫 글자가 반드시 [ 이어야 합니다."
-
-    try:
-        raw = await run_claude(review_system, review_user_prompt, model=settings.LLM_MODEL, session_id=session_id)
-        verdicts = _parse_cards_json(raw)
-    except Exception as e:
-        logger.warning("검수 호출 실패, 전체 통과 처리: %s", e)
-        return cards, []
-
-    verdict_map = {v["index"]: v for v in verdicts if "index" in v}
-
-    passed = []
-    failed = []
-    for i, card in enumerate(cards):
-        v = verdict_map.get(i)
-        if v and str(v.get("verdict", "")).lower() == "fail":
-            failed.append((card, v.get("reason", "기준 미달")))
-        else:
-            passed.append(card)
-
-    logger.info("검수 결과: %d장 중 %d장 통과, %d장 제외", len(cards), len(passed), len(failed))
-    return passed, failed
-
-
-async def _generate_supplemental(
-    pages: List[Dict], template_type: str,
-    existing_cards: List[Dict], failed_cards: list, deficit: int,
-    session_id: str | None = None,
-) -> List[Dict]:
-    """부족분 추가 카드를 생성합니다."""
-    system_prompt = _build_system_prompt(template_type)
-
-    # 원본 텍스트
-    source_parts = []
-    for page in pages:
-        source_parts.append(f"=== 페이지 {page['page_num']} ===\n{page['text']}")
-    source_text = "\n\n".join(source_parts)
-
-    existing_fronts = "\n".join(f"- {c['front']}" for c in existing_cards)
-    failed_info = "\n".join(
-        f"- {c['front']} → 사유: {reason}" for c, reason in failed_cards[:10]
-    )
-
-    user_prompt = f"""{source_text}
-
----
-
-## 추가 생성 지시
-
-이전 생성에서 일부 카드가 품질 기준 미달로 제외되었습니다.
-현재 유효 카드: {len(existing_cards)}장 / {deficit}장 추가 필요
-
-### 제외된 카드 (같은 실수 반복 금지):
-{failed_info if failed_info else "(없음)"}
-
-### 이미 생성된 카드 (중복 금지):
-{existing_fronts}
-
-위 텍스트에서 아직 다루지 않은 출제 포인트를 찾아 **{deficit}장 이상**의 추가 카드를 만드세요.
-이미 생성된 카드와 중복되지 않도록 주의하세요."""
-
-    logger.info("추가 생성 요청: %d장 부족, 기존 %d장", deficit, len(existing_cards))
-
-    try:
-        raw = await run_claude(system_prompt, user_prompt, model=settings.LLM_MODEL, session_id=session_id)
-        cards_raw = _parse_cards_json(raw)
-    except Exception as e:
-        logger.warning("추가 생성 실패: %s", e)
+    # 분석 결과가 비어있으면 (표지/목차만 있는 경우) 빈 리스트 반환
+    if not analysis.get("key_concepts") and not analysis.get("comparison_pairs") and not analysis.get("cloze_candidates"):
+        logger.info("청크 #%d: 분석 결과 비어있음 (표지/목차), 카드 생성 건너뜀", chunk_idx)
         return []
 
-    validated = _validate_cards(cards_raw, template_type)
-    logger.info("추가 생성 완료: %d장 검증 통과", len(validated))
-    return validated
+    # Step 3: 카드 생성
+    cards = await _create_cards_from_analysis(analysis, pages, template_type, chunk_idx, session_id=session_id)
+
+    if not cards:
+        logger.warning("청크 #%d: 분석은 성공했으나 카드 0장 생성", chunk_idx)
+
+    logger.info("청크 #%d 파이프라인 완료: %d장", chunk_idx, len(cards))
+    return cards
 
 
 MIN_RECOMMEND = 10
 MAX_CARDS = 120
 CHUNK_SIZE = 5  # 5페이지씩 분할
-MAX_REVIEW_ROUNDS = 3  # 최대 검수 반복 횟수
-REVIEW_PASS_THRESHOLD = 0.8  # 통과율 80% 이상이면 추가 생성 불필요
-MIN_TARGET_CARDS = 20  # 최소 목표 카드 수
 
 
 async def generate_cards(
@@ -434,7 +471,7 @@ async def generate_cards(
     on_progress=None,
     is_math: bool = False,
 ) -> List[Dict]:
-    """PDF 텍스트에서 Claude를 이용해 암기카드를 생성합니다. 청크 병렬 처리 + 3단계 검수."""
+    """PDF 텍스트에서 Claude를 이용해 암기카드를 생성합니다. 3단계 파이프라인 (분석→카드생성)."""
     total_text_len = sum(len(p["text"]) for p in pages)
     logger.info("카드 생성 시작: %d페이지, 총 %d자, 템플릿=%s", len(pages), total_text_len, template_type)
 
@@ -501,56 +538,6 @@ async def generate_cards(
             raise ValueError(f"전체 {total_chunks}개 청크 모두 실패했습니다. PDF 내용을 확인해주세요.")
         raise ValueError("생성된 카드가 없습니다. PDF 내용을 확인해주세요.")
 
-    # 목표 카드 수 계산
-    target_cards = max(len(pages) * 4, MIN_TARGET_CARDS)
-    target_cards = min(target_cards, MAX_CARDS)
-    logger.info("초기 생성: %d장, 목표: %d장", len(result), target_cards)
-
-    # 품질 검수 — 초기 생성이 목표의 80% 이상이면 검수 생략 (서버 부하 절감)
-    if on_progress:
-        await on_progress(completed_chunks=total_chunks, total_chunks=total_chunks, phase="reviewing")
-
-    skip_review = len(result) >= target_cards * 0.8
-    if skip_review:
-        logger.info("초기 생성 %d장 ≥ 목표의 80%% (%d장), 검수 생략", len(result), int(target_cards * 0.8))
-    else:
-        all_passed = []
-        current_cards = result
-
-        for round_num in range(MAX_REVIEW_ROUNDS):
-            passed, failed = await _review_cards(current_cards, session_id=session_id)
-            all_passed.extend(passed)
-
-            pass_rate = len(passed) / len(current_cards) if current_cards else 1.0
-            logger.info(
-                "검수 %d회차: %d장 중 %d장 통과 (%.0f%%), 누적 통과: %d장",
-                round_num + 1, len(current_cards), len(passed),
-                pass_rate * 100, len(all_passed),
-            )
-
-            # 통과율 충분하거나 목표 달성 시 종료
-            if pass_rate >= REVIEW_PASS_THRESHOLD or len(all_passed) >= target_cards:
-                break
-
-            # 마지막 회차면 추가 생성 없이 종료
-            if round_num >= MAX_REVIEW_ROUNDS - 1:
-                break
-
-            # 부족분 추가 생성
-            deficit = target_cards - len(all_passed)
-            if deficit <= 0:
-                break
-
-            current_cards = await _generate_supplemental(
-                pages, template_type, all_passed, failed, deficit,
-                session_id=session_id,
-            )
-            if not current_cards:
-                logger.warning("추가 생성 결과 0장, 검수 루프 종료")
-                break
-
-        result = all_passed
-
     # MAX_CARDS 초과 시 truncate
     if len(result) > MAX_CARDS:
         result = result[:MAX_CARDS]
@@ -567,5 +554,5 @@ async def generate_cards(
     if not result:
         raise ValueError("생성된 카드가 없습니다. PDF 내용을 확인해주세요.")
 
-    logger.info("최종 카드: %d장 (생성+품질검수 완료)", len(result))
+    logger.info("최종 카드: %d장 (3단계 파이프라인 완료)", len(result))
     return result
