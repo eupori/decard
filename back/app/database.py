@@ -42,6 +42,7 @@ def create_tables():
     _migrate_session_progress()
     _migrate_users_auth_providers()
     _migrate_session_share_key()
+    _migrate_folder_exam_date()
 
 
 def _migrate_device_id():
@@ -154,6 +155,17 @@ def _migrate_users_auth_providers():
         # SQLite는 기본적으로 NOT NULL 제약을 무시하지 않음
         # → 테이블 재생성 마이그레이션 필요
         _recreate_users_table_if_needed(conn, columns)
+
+
+def _migrate_folder_exam_date():
+    """Add exam_date column to folders table if missing."""
+    insp = inspect(engine)
+    if "folders" not in insp.get_table_names():
+        return
+    columns = [c["name"] for c in insp.get_columns("folders")]
+    if "exam_date" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE folders ADD COLUMN exam_date VARCHAR"))
 
 
 def _migrate_session_share_key():

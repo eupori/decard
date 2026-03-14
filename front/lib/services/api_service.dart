@@ -281,12 +281,14 @@ class ApiService {
     String folderId, {
     String? name,
     String? color,
+    String? examDate,  // "2026-03-25" 또는 "" (삭제)
   }) async {
     final hdrs = await _headers();
     hdrs['Content-Type'] = 'application/json';
     final body = <String, dynamic>{};
     if (name != null) body['name'] = name;
     if (color != null) body['color'] = color;
+    if (examDate != null) body['exam_date'] = examDate;
 
     final response = await http.patch(
       Uri.parse(ApiConfig.folderUrl(folderId)),

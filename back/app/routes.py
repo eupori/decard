@@ -366,6 +366,7 @@ def list_folders(request: Request, db: Session = Depends(get_db)):
             "id": f.id,
             "name": f.name,
             "color": f.color,
+            "exam_date": f.exam_date,
             "session_count": session_count,
             "card_count": card_count,
             "created_at": f.created_at.isoformat() + "Z",
@@ -396,6 +397,7 @@ def create_folder(
         "id": folder.id,
         "name": folder.name,
         "color": folder.color,
+        "exam_date": folder.exam_date,
         "session_count": 0,
         "card_count": 0,
         "created_at": folder.created_at.isoformat() + "Z",
@@ -419,6 +421,8 @@ def update_folder(
         folder.name = body.name
     if body.color is not None and body.color in PRESET_COLORS:
         folder.color = body.color
+    if body.exam_date is not None:
+        folder.exam_date = body.exam_date if body.exam_date else None  # "" → null (삭제)
     from datetime import datetime as dt
     folder.updated_at = dt.utcnow()
 
@@ -431,6 +435,7 @@ def update_folder(
         "id": folder.id,
         "name": folder.name,
         "color": folder.color,
+        "exam_date": folder.exam_date,
         "session_count": session_count,
         "card_count": card_count,
         "created_at": folder.created_at.isoformat() + "Z",

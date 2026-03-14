@@ -38,6 +38,7 @@ class FolderModel(Base):
     user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
     device_id = Column(String, index=True, default="anonymous")
     color = Column(String, default="#C2E7DA")
+    exam_date = Column(String, nullable=True)  # ISO 날짜 문자열 "2026-03-25" (nullable=미설정)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -175,6 +176,7 @@ class FolderCreate(BaseModel):
 class FolderUpdate(BaseModel):
     name: Optional[str] = None
     color: Optional[str] = None
+    exam_date: Optional[str] = None  # "2026-03-25" 또는 "" (삭제)
 
 
 class FolderResponse(BaseModel):

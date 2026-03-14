@@ -24,11 +24,13 @@ class _FolderDetailScreenState extends State<FolderDetailScreen> {
   bool _error = false;
 
   late String _folderName;
+  String? _examDate;
 
   @override
   void initState() {
     super.initState();
     _folderName = widget.folder.name;
+    _examDate = widget.folder.examDate;
     _loadSessions();
   }
 
@@ -76,6 +78,108 @@ class _FolderDetailScreenState extends State<FolderDetailScreen> {
     }
   }
 
+  Widget _buildDDayBanner(ColorScheme cs) {
+    final exam = DateTime.tryParse(_examDate!);
+    if (exam == null) return const SizedBox.shrink();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final dDay = exam.difference(today).inDays;
+    final dDayText = dDay == 0 ? 'D-Day' : (dDay > 0 ? 'D-$dDay' : 'D+${-dDay}');
+    final color = dDay <= 0
+        ? const Color(0xFFEF4444)
+        : dDay <= 3
+            ? const Color(0xFFF59E0B)
+            : const Color(0xFF3B82F6);
+
+    final month = exam.month;
+    final day = exam.day;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      color: color.withValues(alpha: 0.1),
+      child: Row(
+        children: [
+          Icon(Icons.event_rounded, size: 16, color: color),
+          const SizedBox(width: 6),
+          Text(
+            '$month월 $day일',
+            style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
+          ),
+          const Spacer(),
+          Text(
+            dDayText,
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: color),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _setExamDate() async {
+    final now = DateTime.now();
+    final initial = _examDate != null
+        ? DateTime.tryParse(_examDate!) ?? now
+        : now.add(const Duration(days: 7));
+
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365)),
+      helpText: '시험일 선택',
+      cancelText: _examDate != null ? '삭제' : '취소',
+    );
+
+    // picked == null: 취소 또는 삭제
+    String? newExamDate;
+    if (picked != null) {
+      newExamDate = picked.toIso8601String().split('T').first;
+    } else if (_examDate != null) {
+      // 이미 시험일이 있는 상태에서 취소 → 삭제할지 확인
+      final delete = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('시험일 삭제'),
+          content: const Text('설정된 시험일을 삭제하시겠습니까?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('아니오'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(minimumSize: Size.zero),
+              child: const Text('삭제'),
+            ),
+          ],
+        ),
+      );
+      if (delete == true) {
+        newExamDate = '';  // 빈 문자열 = 삭제
+      } else {
+        return;  // 아무것도 안 함
+      }
+    } else {
+      return;  // 시험일 없는 상태에서 취소
+    }
+
+    try {
+      await ApiService.updateFolder(widget.folder.id, examDate: newExamDate);
+      setState(() {
+        _examDate = newExamDate!.isEmpty ? null : newExamDate;
+      });
+      if (mounted) {
+        showSuccessSnackBar(
+          context,
+          newExamDate.isEmpty ? '시험일이 삭제되었습니다.' : '시험일이 설정되었습니다.',
+        );
+      }
+    } catch (e) {
+      if (mounted) showErrorSnackBar(context, friendlyError(e));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -89,10 +193,21 @@ class _FolderDetailScreenState extends State<FolderDetailScreen> {
           PopupMenuButton<String>(
             onSelected: (value) {
               if (value == 'edit') _editFolder();
+              if (value == 'exam_date') _setExamDate();
               if (value == 'delete') _deleteFolder();
             },
             itemBuilder: (_) => [
               const PopupMenuItem(value: 'edit', child: Text('수정')),
+              PopupMenuItem(
+                value: 'exam_date',
+                child: Row(
+                  children: [
+                    const Icon(Icons.event_rounded, size: 20),
+                    const SizedBox(width: 8),
+                    Text(_examDate != null ? '시험일 변경' : '시험일 설정'),
+                  ],
+                ),
+              ),
               const PopupMenuItem(
                 value: 'delete',
                 child: Text('삭제', style: TextStyle(color: Color(0xFFEF4444))),
@@ -101,8 +216,15 @@ class _FolderDetailScreenState extends State<FolderDetailScreen> {
           ),
         ],
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(4),
-          child: Container(height: 4, color: color),
+          preferredSize: Size.fromHeight(_examDate != null ? 36 : 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(height: 4, color: color),
+              if (_examDate != null)
+                _buildDDayBanner(cs),
+            ],
+          ),
         ),
       ),
       body: RefreshIndicator(

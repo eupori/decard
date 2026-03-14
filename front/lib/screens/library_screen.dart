@@ -270,7 +270,28 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.folder_rounded, color: color, size: 28),
+                    Row(
+                      children: [
+                        Icon(Icons.folder_rounded, color: color, size: 28),
+                        const Spacer(),
+                        if (folder.dDayText != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: _dDayColor(folder.dDay!).withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              folder.dDayText!,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: _dDayColor(folder.dDay!),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                     const SizedBox(height: 10),
                     Text(
                       folder.name,
@@ -295,6 +316,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
         ),
       ),
     );
+  }
+
+  Color _dDayColor(int dDay) {
+    if (dDay <= 0) return const Color(0xFFEF4444);   // 지남/당일: 빨강
+    if (dDay <= 3) return const Color(0xFFF59E0B);   // 3일 이내: 주황
+    if (dDay <= 7) return const Color(0xFF3B82F6);   // 7일 이내: 파랑
+    return const Color(0xFF6B7280);                    // 그 외: 회색
   }
 
   void _showFolderMenu(FolderModel folder) {
