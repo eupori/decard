@@ -3,6 +3,7 @@ import csv
 import io
 import logging
 import re
+import uuid
 from datetime import timedelta
 from typing import Optional
 
@@ -561,6 +562,68 @@ def remove_from_library(
     session.display_name = None
     db.commit()
     return {"removed": session_id}
+
+
+# ──────────────────────────────────────
+# POST /api/v1/sessions/{id}/share — 공유 링크 생성
+# ──────────────────────────────────────
+
+@router.post("/sessions/{session_id}/share")
+def create_share_link(
+    session_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    owner_filter = get_owner_filter(request)
+    session = owner_filter(db.query(SessionModel).filter(SessionModel.id == session_id)).first()
+    if not session:
+        raise HTTPException(404, "세션을 찾을 수 없습니다.")
+    if session.status != "completed":
+        raise HTTPException(400, "완료된 세션만 공유할 수 있습니다.")
+
+    # 이미 share_key가 있으면 그대로 반환
+    if not session.share_key:
+        session.share_key = uuid.uuid4().hex[:12]
+        db.commit()
+        db.refresh(session)
+
+    return {
+        "share_key": session.share_key,
+        "share_url": f"{settings.FRONTEND_URL}/#/shared/{session.share_key}",
+    }
+
+
+# ──────────────────────────────────────
+# GET /api/v1/shared/{share_key} — 공유 세션 읽기 전용 조회
+# ──────────────────────────────────────
+
+@router.get("/shared/{share_key}")
+def get_shared_session(share_key: str, db: Session = Depends(get_db)):
+    session = db.query(SessionModel).filter(SessionModel.share_key == share_key).first()
+    if not session:
+        raise HTTPException(404, "공유 링크를 찾을 수 없습니다.")
+
+    # accepted 카드만 공개 (pending/rejected는 비공개)
+    cards = [
+        {
+            "id": c.id,
+            "front": c.front,
+            "back": c.back,
+            "evidence": c.evidence,
+            "evidence_page": c.evidence_page,
+            "tags": c.tags,
+            "template_type": c.template_type,
+        }
+        for c in session.cards if c.status == "accepted"
+    ]
+    return {
+        "title": session.display_name or session.filename.replace(".pdf", ""),
+        "card_count": len(cards),
+        "template_type": session.template_type,
+        "created_at": session.created_at.isoformat() + "Z",
+        "cards": cards,
+        "is_shared": True,  # 프론트에서 읽기 전용 모드 판별용
+    }
 
 
 # ──────────────────────────────────────

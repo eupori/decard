@@ -45,6 +45,12 @@ class ApiConfig {
   static String removeFromLibraryUrl(String sessionId) =>
       '$baseUrl$apiPrefix/sessions/$sessionId/remove-from-library';
 
+  // Share
+  static String shareSessionUrl(String id) =>
+      '$baseUrl$apiPrefix/sessions/$id/share';
+  static String sharedSessionUrl(String shareKey) =>
+      '$baseUrl$apiPrefix/shared/$shareKey';
+
   // Explore
   static String get exploreCategoriesUrl => '$baseUrl$apiPrefix/explore/categories';
   static String get exploreCardsetsUrl => '$baseUrl$apiPrefix/explore/cardsets';

@@ -56,6 +56,7 @@ class SessionModel(Base):
     folder_id = Column(String, ForeignKey("folders.id"), nullable=True, index=True)
     display_name = Column(String, nullable=True)
     source_type = Column(String, default="pdf")  # pdf / manual / csv / xlsx
+    share_key = Column(String, unique=True, nullable=True, index=True)  # 공유 키 (null=비공개)
     status = Column(String, default="processing")  # processing / completed / failed
     error_message = Column(String, nullable=True)      # 실패 사유
     progress = Column(Integer, default=0)               # 0~100

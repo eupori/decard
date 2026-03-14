@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 import '../config/responsive.dart';
 import '../config/theme.dart';
 import '../models/session_model.dart';
@@ -42,6 +44,86 @@ class _ReviewScreenState extends State<ReviewScreen> {
   int get _acceptedCount => _cards.where((c) => c.isAccepted).length;
   int get _rejectedCount => _cards.where((c) => c.isRejected).length;
   int get _pendingCount => _cards.where((c) => c.isPending).length;
+
+  Future<void> _shareSession() async {
+    try {
+      final result = await ApiService.createShareLink(widget.session.id);
+      final shareUrl = result['share_url'] as String;
+      final title = widget.session.displayName ??
+          widget.session.filename.replaceAll('.pdf', '');
+      if (!mounted) return;
+
+      showModalBottomSheet(
+        context: context,
+        builder: (ctx) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('공유 링크', style: Theme.of(ctx).textTheme.titleMedium),
+                const SizedBox(height: 4),
+                Text(
+                  '받는 사람은 카드를 읽기만 할 수 있습니다.',
+                  style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                      ),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Theme.of(ctx).colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          shareUrl,
+                          style: Theme.of(ctx).textTheme.bodySmall,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: const Icon(Icons.copy_rounded, size: 20),
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: shareUrl));
+                          Navigator.pop(ctx);
+                          showSuccessSnackBar(context, '링크가 복사되었습니다.');
+                        },
+                        tooltip: '복사',
+                        constraints: const BoxConstraints(),
+                        padding: EdgeInsets.zero,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      Share.share('$title - 데카드 암기카드\n$shareUrl');
+                    },
+                    icon: const Icon(Icons.share_rounded),
+                    label: const Text('다른 앱으로 공유'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        showErrorSnackBar(context, '공유 링크 생성 실패: ${friendlyError(e)}');
+      }
+    }
+  }
 
   Future<void> _updateCardStatus(CardModel card, String status) async {
     try {
@@ -289,6 +371,11 @@ class _ReviewScreenState extends State<ReviewScreen> {
           style: const TextStyle(fontSize: 16),
         ),
         actions: [
+          IconButton(
+            onPressed: _shareSession,
+            icon: const Icon(Icons.share_rounded),
+            tooltip: '공유하기',
+          ),
           IconButton(
             onPressed: _startStudy,
             icon: const Icon(Icons.school_rounded),

@@ -41,6 +41,7 @@ def create_tables():
     _migrate_public_cardsets()
     _migrate_session_progress()
     _migrate_users_auth_providers()
+    _migrate_session_share_key()
 
 
 def _migrate_device_id():
@@ -153,6 +154,16 @@ def _migrate_users_auth_providers():
         # SQLite는 기본적으로 NOT NULL 제약을 무시하지 않음
         # → 테이블 재생성 마이그레이션 필요
         _recreate_users_table_if_needed(conn, columns)
+
+
+def _migrate_session_share_key():
+    """Add share_key column to sessions table if missing."""
+    insp = inspect(engine)
+    columns = [c["name"] for c in insp.get_columns("sessions")]
+    if "share_key" not in columns:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE sessions ADD COLUMN share_key VARCHAR"))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_sessions_share_key ON sessions (share_key)"))
 
 
 def _recreate_users_table_if_needed(conn, columns):

@@ -538,6 +538,37 @@ class ApiService {
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
+  // ── Share API ──
+
+  /// 공유 링크 생성 (share_key 반환)
+  static Future<Map<String, dynamic>> createShareLink(String sessionId) async {
+    final response = await http.post(
+      Uri.parse(ApiConfig.shareSessionUrl(sessionId)),
+      headers: await _headers(),
+    );
+    if (response.statusCode != 200) {
+      throw ApiException(
+        _extractDetail(response.body) ?? '공유 링크 생성에 실패했습니다.',
+        response.statusCode,
+      );
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
+  /// 공유 세션 조회 (인증 불필요)
+  static Future<Map<String, dynamic>> getSharedSession(String shareKey) async {
+    final response = await http.get(
+      Uri.parse(ApiConfig.sharedSessionUrl(shareKey)),
+    );
+    if (response.statusCode != 200) {
+      throw ApiException(
+        _extractDetail(response.body) ?? '공유 링크를 찾을 수 없습니다.',
+        response.statusCode,
+      );
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>;
+  }
+
   // ── SRS API ──
 
   /// 카드 복습 결과 기록
