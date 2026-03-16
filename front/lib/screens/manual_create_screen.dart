@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -5,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import '../services/api_service.dart';
 import '../utils/snackbar_helper.dart';
+import '../utils/file_download_stub.dart'
+    if (dart.library.js_interop) '../utils/file_download.dart';
 import '../widgets/content_width.dart';
 import 'review_screen.dart';
 
@@ -263,6 +266,15 @@ class _ManualCreateScreenState extends State<ManualCreateScreen>
   // ──────────────────────────────────────
   // 파일 가져오기
   // ──────────────────────────────────────
+
+  void _downloadSampleCsv() {
+    const csvContent = '앞면(질문),뒷면(답),근거(선택)\n'
+        '미토콘드리아의 주요 기능은?,ATP 합성 (세포 에너지 생산),세포생물학 교재 p.45\n'
+        '광합성이 일어나는 세포소기관은?,엽록체,\n'
+        'DNA 이중나선 구조를 발견한 사람은?,왓슨과 크릭 (1953),분자생물학 개론 p.12\n';
+    final bytes = Uint8List.fromList(utf8.encode(csvContent));
+    downloadFile('decard_sample.csv', bytes);
+  }
 
   Future<void> _pickImportFile() async {
     final result = await FilePicker.platform.pickFiles(
@@ -820,12 +832,37 @@ class _ManualCreateScreenState extends State<ManualCreateScreen>
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: cs.outlineVariant),
               ),
-              child: Text(
-                'CSV 또는 XLSX 파일을 선택하세요.\n1열: 앞면(질문), 2열: 뒷면(답), 3열: 근거(선택)',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: cs.onSurfaceVariant,
-                      height: 1.5,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'CSV 또는 XLSX 파일을 선택하세요.\n1열: 앞면(질문), 2열: 뒷면(답), 3열: 근거(선택)',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: cs.onSurfaceVariant,
+                          height: 1.5,
+                        ),
+                  ),
+                  const SizedBox(height: 10),
+                  GestureDetector(
+                    onTap: _downloadSampleCsv,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.download_rounded, size: 16, color: cs.primary),
+                        const SizedBox(width: 4),
+                        Text(
+                          '샘플 CSV 다운로드',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: cs.primary,
+                                fontWeight: FontWeight.w600,
+                                decoration: TextDecoration.underline,
+                                decorationColor: cs.primary,
+                              ),
+                        ),
+                      ],
                     ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 20),

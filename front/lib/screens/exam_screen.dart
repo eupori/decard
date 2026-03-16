@@ -585,6 +585,7 @@ class _ExamScreenState extends State<ExamScreen> {
     return TextField(
       controller: _answerController,
       maxLines: 4,
+      onChanged: (_) => setState(() {}),
       decoration: InputDecoration(
         hintText: '답안을 입력하세요...',
         border: OutlineInputBorder(
