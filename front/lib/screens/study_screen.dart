@@ -27,6 +27,8 @@ class StudyScreen extends StatefulWidget {
 
 class _StudyScreenState extends State<StudyScreen>
     with TickerProviderStateMixin {
+  static const int _roundSize = 20;
+
   late List<CardModel> _cards;
   int _currentIndex = 0;
   bool _showBack = false;
@@ -34,6 +36,7 @@ class _StudyScreenState extends State<StudyScreen>
   double _dragOffset = 0;
   bool _isRating = false; // SRS 평가 진행 중
   int _reviewedCount = 0;
+  bool _showRoundComplete = false;
 
   late AnimationController _slideController;
   Offset _slideAnimOffset = Offset.zero;
@@ -126,10 +129,28 @@ class _StudyScreenState extends State<StudyScreen>
     setState(() {});
   }
 
+  int get _currentRound => _currentIndex ~/ _roundSize;
+  int get _totalRounds => (_cards.length / _roundSize).ceil();
+  int get _posInRound => _currentIndex % _roundSize;
+  int get _currentRoundSize =>
+      min(_roundSize, _cards.length - _currentRound * _roundSize);
+
   void _next() {
     if (_currentIndex < _cards.length - 1 && !_isAnimating) {
+      // 라운드 마지막 카드에서 다음 누르면 라운드 완료 표시
+      if (_totalRounds > 1 &&
+          _posInRound == _currentRoundSize - 1 &&
+          _currentRound < _totalRounds - 1) {
+        setState(() => _showRoundComplete = true);
+        return;
+      }
       _animateSlideOut(1);
     }
+  }
+
+  void _continueNextRound() {
+    setState(() => _showRoundComplete = false);
+    _animateSlideOut(1);
   }
 
   void _prev() {
@@ -184,6 +205,7 @@ class _StudyScreenState extends State<StudyScreen>
       _currentIndex = 0;
       _showBack = false;
       _isCompleted = false;
+      _showRoundComplete = false;
       _dragOffset = 0;
       _slideAnimOffset = Offset.zero;
       _animRotation = 0;
@@ -198,6 +220,7 @@ class _StudyScreenState extends State<StudyScreen>
       _currentIndex = 0;
       _showBack = false;
       _isCompleted = false;
+      _showRoundComplete = false;
       _dragOffset = 0;
       _slideAnimOffset = Offset.zero;
       _animRotation = 0;
@@ -227,6 +250,62 @@ class _StudyScreenState extends State<StudyScreen>
 
   void _complete() {
     setState(() => _isCompleted = true);
+  }
+
+  Widget _buildRoundCompleteCard(ColorScheme cs, int roundNum) {
+    return Center(
+      child: Container(
+        width: double.infinity,
+        margin: const EdgeInsets.symmetric(horizontal: 20),
+        padding: const EdgeInsets.all(32),
+        decoration: BoxDecoration(
+          color: cs.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: cs.primary, width: 2),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: AppTheme.acceptedColor.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.check_circle_rounded,
+                size: 32,
+                color: AppTheme.acceptedColor,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '라운드 $roundNum 완료!',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${_totalRounds - roundNum}라운드 남았어요',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
+            ),
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              onPressed: _continueNextRound,
+              icon: const Icon(Icons.arrow_forward_rounded, size: 18),
+              label: const Text('다음 라운드'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(200, 48),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildRatingButtons(ColorScheme cs) {
@@ -275,7 +354,14 @@ class _StudyScreenState extends State<StudyScreen>
 
     if (_currentIndex < _cards.length - 1) {
       setState(() => _isRating = false);
-      _animateSlideOut(1);
+      // 라운드 마지막 카드면 라운드 완료 표시
+      if (_totalRounds > 1 &&
+          _posInRound == _currentRoundSize - 1 &&
+          _currentRound < _totalRounds - 1) {
+        setState(() => _showRoundComplete = true);
+      } else {
+        _animateSlideOut(1);
+      }
     } else {
       setState(() {
         _isRating = false;
@@ -401,8 +487,10 @@ class _StudyScreenState extends State<StudyScreen>
 
     final cs = Theme.of(context).colorScheme;
     final card = _cards[_currentIndex];
-    final progress = _currentIndex + 1;
-    final total = _cards.length;
+    final roundNum = _currentRound + 1;
+    final posInRound = _posInRound + 1;
+    final roundSize = _currentRoundSize;
+    final useRounds = _totalRounds > 1;
 
     return Scaffold(
       appBar: AppBar(
@@ -425,32 +513,62 @@ class _StudyScreenState extends State<StudyScreen>
               padding:
                   const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               child: Semantics(
-                label: '$progress / $total 카드 진행',
-                child: Row(
+                label: useRounds
+                    ? '라운드 $roundNum/$_totalRounds, $posInRound/$roundSize 카드'
+                    : '$posInRound/$roundSize 카드 진행',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      '$progress / $total (${(progress / total * 100).round()}%)',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: cs.primary,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: TweenAnimationBuilder<double>(
-                          tween: Tween(end: progress / total),
-                          duration: const Duration(milliseconds: 300),
-                          curve: Curves.easeInOut,
-                          builder: (context, value, _) =>
-                              LinearProgressIndicator(
-                            value: value,
-                            minHeight: 6,
-                            backgroundColor: cs.surfaceContainerLow,
-                            color: cs.primary,
+                    Row(
+                      children: [
+                        if (useRounds) ...[
+                          Text(
+                            '라운드 $roundNum/$_totalRounds',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: cs.primary,
+                            ),
                           ),
+                          Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 8),
+                            width: 1,
+                            height: 14,
+                            color: cs.outlineVariant,
+                          ),
+                        ],
+                        Text(
+                          '$posInRound / $roundSize',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: useRounds ? cs.onSurfaceVariant : cs.primary,
+                          ),
+                        ),
+                        const Spacer(),
+                        if (useRounds)
+                          Text(
+                            '전체 ${_currentIndex + 1}/${_cards.length}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: cs.onSurfaceVariant.withValues(alpha: 0.6),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: TweenAnimationBuilder<double>(
+                        tween: Tween(end: posInRound / roundSize),
+                        duration: const Duration(milliseconds: 300),
+                        curve: Curves.easeInOut,
+                        builder: (context, value, _) =>
+                            LinearProgressIndicator(
+                          value: value,
+                          minHeight: 6,
+                          backgroundColor: cs.surfaceContainerLow,
+                          color: cs.primary,
                         ),
                       ),
                     ),
@@ -459,7 +577,12 @@ class _StudyScreenState extends State<StudyScreen>
               ),
             ),
 
-            // 카드
+            // 라운드 완료 화면 또는 카드
+            if (_showRoundComplete)
+              Expanded(
+                child: _buildRoundCompleteCard(cs, roundNum),
+              )
+            else
             Expanded(
               child: Semantics(
                 label: '카드 탭하여 뒤집기, 스와이프로 넘기기',
@@ -600,7 +723,9 @@ class _StudyScreenState extends State<StudyScreen>
             ),
 
             // 하단 버튼
-            if (widget.srsMode && _showBack)
+            if (_showRoundComplete)
+              const SizedBox.shrink()
+            else if (widget.srsMode && _showBack)
               _buildRatingButtons(cs)
             else
               Padding(
