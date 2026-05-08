@@ -101,6 +101,7 @@ class _HomeScreenState extends State<HomeScreen> {
     ('definition', '정의형', 'OO란? 형태의 Q&A', Icons.menu_book_rounded),
     ('cloze', '빈칸형', '핵심 키워드 빈칸 채우기', Icons.edit_note_rounded),
     ('comparison', '비교형', 'A vs B 차이점 비교', Icons.compare_arrows_rounded),
+    ('vocab', '외국어 단어', '단어 → 뜻 단어카드', Icons.translate_rounded),
   ];
 
   bool get _hasFile =>

@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     # Limits
     MAX_PDF_SIZE_MB: int = 10
     MAX_PAGES: int = 100
+    MAX_OCR_PAGES: int = 10  # 이미지 PDF (OCR 폴백) 페이지 제한
     FREE_MONTHLY_LIMIT: int = 10
 
     # Kakao OAuth

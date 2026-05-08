@@ -75,7 +75,7 @@ decard/
 │   │   ├── claude_cli.py     # Claude CLI 래퍼 (JSON 출력, Semaphore=5, 메모리 모니터링)
 │   │   ├── review_service.py # 검수 서비스 (레거시, 현재 미사용)
 │   │   ├── grade_service.py  # AI 채점
-│   │   └── pdf_service.py    # pdfplumber 텍스트 추출
+│   │   └── pdf_service.py    # pdfplumber 텍스트 추출 + Tesseract OCR 폴백 (이미지 PDF)
 │   ├── .env                  # 로컬 환경변수
 │   ├── .env.production       # 프로덕션 환경변수
 │   └── requirements.txt
@@ -149,6 +149,7 @@ decard/
 - `definition`: 정의형 ("OO란?")
 - `cloze`: 빈칸형 ("___에 들어갈 말은?")
 - `comparison`: 비교형 ("A vs B")
+- `vocab`: 외국어 단어카드 ("단어 → 발음 / 뜻") — 일본어/중국어/영어/기타 자동 감지
 
 ---
 
@@ -239,6 +240,7 @@ LLM_MODEL=claude-sonnet-4-5-20250929
 DATABASE_URL=sqlite:///./decard.db
 MAX_PDF_SIZE_MB=10
 MAX_PAGES=100
+MAX_OCR_PAGES=10  # 이미지 PDF (OCR 폴백) 페이지 제한
 
 # Kakao OAuth
 KAKAO_CLIENT_ID=<REST API 키>
@@ -273,7 +275,7 @@ static const String baseUrl = String.fromEnvironment(
 4. **Android cleartext**: release APK에서 HTTP 접근 시 `AndroidManifest.xml`에 `usesCleartextTraffic="true"` 필수
 5. **Flutter 웹 핫리로드**: `flutter run -d chrome`이 죽으면 포트 점유 남음. `lsof -ti :8080 | xargs kill -9` 후 재시작
 6. **ID 형식**: 세션 `ses_{uuid.hex[:10]}`, 카드 `card_{uuid.hex[:8]}`, 유저 `usr_{uuid.hex[:10]}`, 폴더 `fld_{uuid.hex[:10]}`
-7. **PDF**: 텍스트 PDF만 지원 (스캔/OCR은 후순위). 크기 10MB, 100페이지 제한
+7. **PDF**: 텍스트 PDF + 이미지 PDF (Tesseract OCR 폴백). 크기 10MB, 텍스트 100페이지/이미지 10페이지 제한. OCR 폴백은 텍스트 레이어가 50% 미만 페이지에서 추출될 때 트리거됨. 다국어: jpn+kor+eng+chi_sim. **손글씨는 거의 인식 못 함**(인쇄 텍스트 위주). Docker 환경에 `tesseract-ocr`, `tesseract-ocr-{jpn,kor,chi-sim}`, `poppler-utils` 필수
 8. **`.env`와 `decard.db`**: 절대 커밋 금지
 9. **카카오 Redirect URI**: 카카오 콘솔 > 앱 > 플랫폼 키 > REST API 키 클릭 > 카카오 로그인 리다이렉트 URI에서 설정
 10. **Flutter web_auth**: `package:web` 사용 (dart:html deprecated). `history.replaceState` 대신 `location.hash = ''` 사용 (Flutter 히스토리 충돌 방지)
@@ -347,7 +349,25 @@ static const String baseUrl = String.fromEnvironment(
   - Group A (10명): Full E2E (업로드→생성→자동채택→수정→학습→CSV→삭제)
   - Group B (10명): 스트레스(3동시), 악성입력(SQL injection/XSS/빈파일), 데이터격리, 엣지케이스, 사이드이펙트
 
-### Phase 5: 콘시어지 테스트 배포 (현재)
+### Phase 6: 외국어 단어카드 + 이미지 PDF OCR (현재)
+- **외국어 단어카드 (`vocab` 템플릿)**: 단어 → 발음 / 한국어 뜻
+  - 자동 언어 감지 (일본어/중국어/영어/기타)
+  - 일본어 → "히라가나 / 한국어 뜻" (예: 世界遺産 → せかいさん / 세계유산)
+  - 중국어 → "병음 / 한국어 뜻"
+  - 영어/기타 → "한국어 뜻"만
+  - 입력 자동 판별: 단어장 표 / 외국어 지문 / 혼합
+  - 별도 분석/생성 프롬프트 (`VOCAB_ANALYSIS_PROMPT`, `VOCAB_CARD_PROMPT`)
+- **이미지/스캔 PDF OCR 폴백**: pdfplumber 텍스트 레이어가 50% 미만이면 Tesseract OCR로 자동 재추출
+  - 다국어: jpn+kor+eng+chi_sim (vert 포함)
+  - DPI 200, pdf2image로 페이지별 이미지화
+  - 페이지 단위 `asyncio.to_thread`로 이벤트 루프 비차단
+  - 페이지별 진행률 콜백 (3~15% 구간)
+  - **OCR 전용 페이지 제한**: `MAX_OCR_PAGES=10` (메모리/시간 안전, 사용자 결정)
+  - 손글씨는 거의 인식 못 함 (Tesseract 한계, 인쇄 텍스트 위주)
+- **시스템 의존성**: `tesseract-ocr` + `tesseract-ocr-{jpn,kor,chi-sim,jpn-vert,kor-vert,chi-sim-vert}` + `poppler-utils` (Dockerfile 추가됨)
+- **에러 처리**: `OcrPageLimitExceeded` → 사용자 친화 메시지 ("이미지 PDF는 최대 N페이지까지...")
+
+### Phase 5: 콘시어지 테스트 배포
 - **피드백 버튼**: 이용가이드 바텀시트에 카카오 오픈채팅 피드백 버튼 추가 (URL placeholder)
 - **APK 빌드 + GitHub Releases**: v0.1.0-beta 릴리스 (APK 52.5MB)
 - **README 업데이트**: 프로젝트 소개 + 다운로드 링크 (releases/latest)

@@ -270,6 +270,8 @@ class _SessionListItemState extends State<SessionListItem> {
         return Icons.compare_arrows_rounded;
       case 'subjective':
         return Icons.draw_rounded;
+      case 'vocab':
+        return Icons.translate_rounded;
       default:
         return Icons.description_outlined;
     }
@@ -285,6 +287,8 @@ class _SessionListItemState extends State<SessionListItem> {
         return '비교형';
       case 'subjective':
         return '주관식';
+      case 'vocab':
+        return '외국어 단어';
       default:
         return type;
     }

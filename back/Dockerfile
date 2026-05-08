@@ -2,9 +2,14 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# System deps + Node.js for Claude Code CLI
+# System deps + Node.js for Claude Code CLI + Tesseract/Poppler for OCR fallback
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc curl \
+    tesseract-ocr \
+    tesseract-ocr-jpn tesseract-ocr-jpn-vert \
+    tesseract-ocr-kor tesseract-ocr-kor-vert \
+    tesseract-ocr-chi-sim tesseract-ocr-chi-sim-vert \
+    poppler-utils \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*

@@ -24,7 +24,7 @@ from .models import (
     ReviewRequest, ReviewResponse, StudyStatsResponse,
     PublishRequest,
 )
-from .pdf_service import extract_text_from_pdf, validate_pdf
+from .pdf_service import extract_text_from_pdf, validate_pdf, OcrPageLimitExceeded
 from .billing_service import get_billing_status, can_generate
 from .card_service import generate_cards
 from .grade_service import grade_answer
@@ -50,8 +50,8 @@ async def generate(
     t0 = time.time()
 
     # "subjective" — TODO: MVP 이후 추가
-    if template_type not in ("definition", "cloze", "comparison"):
-        raise HTTPException(400, "지원하지 않는 템플릿입니다. (definition / cloze / comparison)")
+    if template_type not in ("definition", "cloze", "comparison", "vocab"):
+        raise HTTPException(400, "지원하지 않는 템플릿입니다. (definition / cloze / comparison / vocab)")
 
     # 월간 생성 한도 체크
     owner = get_owner_id(request)
@@ -834,7 +834,10 @@ async def _generate_in_background(
             session.completed_chunks = completed_chunks
             session.total_chunks = total_chunks
             if phase == "extracting":
-                session.progress = 5
+                session.progress = 3
+            elif phase == "ocr":
+                # OCR 진행: 3~15% 구간 (페이지별 비례)
+                session.progress = 3 + int(completed_chunks / max(total_chunks, 1) * 12)
             elif phase == "chunked":
                 session.progress = 15
             elif phase == "generating":
@@ -850,10 +853,18 @@ async def _generate_in_background(
         except Exception as e:
             logger.error("진행률 업데이트 실패: session=%s, error=%s: %s", session_id, type(e).__name__, e)
 
+    async def _on_ocr_progress(page_num: int, total: int):
+        """OCR 페이지별 진행률 콜백."""
+        await _update_progress(page_num, total, "ocr")
+
     try:
-        # 텍스트 추출 (백그라운드에서 실행)
+        # 텍스트 추출 (백그라운드에서 실행, OCR 폴백 포함)
         await _update_progress(0, 0, "extracting")
-        extraction = extract_text_from_pdf(pdf_content)
+        extraction = await extract_text_from_pdf(
+            pdf_content,
+            on_ocr_progress=_on_ocr_progress,
+            max_ocr_pages=settings.MAX_OCR_PAGES,
+        )
         pages = extraction["pages"]
         extraction_method = extraction["method"]
         logger.info("텍스트 추출 완료: method=%s, is_math=%s, pages=%d",
@@ -896,12 +907,14 @@ async def _generate_in_background(
                 session.status = "failed"
                 # 사용자에게 보여줄 에러 메시지 — 기술적 세부사항은 줄이고 사유 위주
                 err_str = str(e)
-                if "타임아웃" in err_str or "timeout" in err_str.lower():
+                if isinstance(e, OcrPageLimitExceeded):
+                    session.error_message = err_str
+                elif "타임아웃" in err_str or "timeout" in err_str.lower():
                     session.error_message = "AI 처리 시간이 초과되었습니다. 더 짧은 PDF로 시도해주세요."
                 elif "빈 응답" in err_str:
                     session.error_message = "AI가 응답하지 않았습니다. 잠시 후 다시 시도해주세요."
                 elif "텍스트를 추출" in err_str:
-                    session.error_message = "PDF에서 텍스트를 읽을 수 없습니다. 스캔된 PDF는 지원하지 않습니다."
+                    session.error_message = "PDF에서 텍스트를 읽을 수 없습니다. 이미지가 너무 흐릿하거나 빈 페이지일 수 있어요."
                 elif "페이지 수 초과" in err_str:
                     session.error_message = err_str
                 else:

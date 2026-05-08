@@ -478,6 +478,8 @@ class _FlashCardItemState extends State<FlashCardItem> {
         return '비교형';
       case 'subjective':
         return '주관식';
+      case 'vocab':
+        return '외국어 단어';
       default:
         return type;
     }

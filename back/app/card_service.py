@@ -49,6 +49,23 @@ TEMPLATE_INSTRUCTIONS = {
 - 뒷면: "동화: 기존 스키마에 새 정보를 맞춤 / 조절: 새 정보에 맞게 스키마를 변경"
 """,
 
+    "vocab": """외국어 단어카드를 만드세요.
+- 앞면: 외국어 단어 (한자라면 한자, 영어라면 영단어)
+- 뒷면: 한국어 뜻 (일본어/중국어는 발음 정보 포함)
+
+예시 (일본어):
+- 앞면: "世界遺産"
+- 뒷면: "せかいさん / 세계유산"
+
+예시 (영어):
+- 앞면: "ubiquitous"
+- 뒷면: "어디에나 있는, 편재하는"
+
+예시 (중국어):
+- 앞면: "学习"
+- 뒷면: "xuéxí / 학습하다, 공부하다"
+""",
+
     "subjective": """주관식(서술형) 카드를 만드세요.
 - 앞면: 서술형 개방 질문 ("~를 서술하시오", "~의 과정을 설명하시오", "~의 의의를 논하시오")
 - 뒷면: 모범답안 3~5문장 (핵심 키워드를 반드시 포함 — AI 채점 기준이 됩니다)
@@ -88,6 +105,114 @@ MATH_SECTION = """
 - 행렬: 텍스트로 명확하게 설명 (예: "[1 2; 3 4]는 2×2 행렬")
 
 """
+
+
+# ── Vocab 모드: 외국어 단어카드 전용 프롬프트 ──
+
+VOCAB_ANALYSIS_PROMPT = """당신은 외국어 학습자료에서 단어를 추출하는 전문가입니다.
+
+## 입력 유형 자동 판별
+입력 텍스트는 두 형태 중 하나입니다:
+- **단어장 표 형식**: 한자/원어 / 발음(가나, 병음) / 한국어 뜻이 줄/열로 정렬됨
+- **외국어 지문/교재**: 외국어 본문에서 핵심 어휘를 직접 골라야 함
+
+## 언어 자동 감지
+- 일본어 (한자 + 히라가나/가타카나)
+- 중국어 (한자만, 한국 한자와 구별)
+- 영어 (라틴 알파벳)
+- 기타 (스페인어, 프랑스어, 독일어 등)
+- 한국어 자료 안에 외국어 용어가 섞인 경우 → 외국어 용어만 추출
+
+## OCR 노이즈 처리 (매우 중요)
+이 텍스트는 책을 사진으로 찍은 PDF에서 OCR로 추출된 것입니다.
+- **인쇄된 텍스트** (한자, 히라가나, 영어 단어 등) → 신뢰
+- **손글씨 메모/필기** → 학생의 학습 흔적, 보조 정보로만 활용 (단어 추출 대상 X)
+- **표 구조 깨짐**: 행/열 구분이 모호할 수 있음 → 인접한 원어/발음/뜻을 짝지어 복원
+- **명백한 OCR 오류 단어** (의미 불명, 깨진 문자열) → 제외
+
+## 추출 규칙
+1. **단어장 표**: 표에 있는 모든 단어를 그대로 추출. 학습자가 이미 정리한 자료 = 신뢰
+2. **외국어 지문**: 시험/학습에 유용한 핵심 어휘만 (관사·be동사·기본 인칭대명사 제외)
+3. **중복 제거**: 같은 단어가 여러 번 등장하면 1번만
+4. **발음 정보**: 일본어 → 히라가나, 중국어 → 병음 (있을 때만)
+5. **뜻**: 한국어로 1~3개 핵심 의미만
+
+## 출력 형식 (가장 중요)
+반드시 JSON만 출력하세요. 다른 텍스트, 설명, 마크다운을 추가하지 마세요.
+계획을 작성하지 마세요. 질문하지 마세요. 첫 글자가 반드시 `{` 이어야 합니다.
+
+{
+  "language": "ja|zh|en|es|fr|de|기타",
+  "source_type": "wordlist|passage|mixed",
+  "vocab_items": [
+    {
+      "word": "원어 단어 (한자/영어 등)",
+      "reading": "발음 (히라가나/병음, 없으면 null)",
+      "meaning": "한국어 뜻 (1~3개 의미)",
+      "example": "원문 예문 (지문이면 단어가 등장한 문장, 단어장이면 null)",
+      "source_page": 페이지번호
+    }
+  ]
+}"""
+
+
+VOCAB_CARD_PROMPT = """당신은 외국어 단어카드를 만드는 전문가입니다.
+
+## 입력
+1. 단어 추출 결과 (JSON) — 단어/발음/뜻
+2. 원문 텍스트 — 근거 확인용
+
+## 카드 작성 규칙
+
+### 앞면
+- 외국어 원어 그대로 (한자라면 한자만, 영어라면 영단어만)
+
+### 뒷면
+- **일본어**: "히라가나 / 한국어 뜻" 형식 (예: "せかいさん / 세계유산")
+- **중국어**: "병음 / 한국어 뜻" 형식 (예: "xuéxí / 학습하다")
+- **영어/기타**: 한국어 뜻만 (예: "어디에나 있는, 편재하는")
+- 발음 정보가 없으면 한국어 뜻만
+
+### evidence
+- 단어장 표에서 온 단어: "단어장 표 (페이지 N)"
+- 지문에서 온 단어: 단어가 등장한 원문 문장
+
+## 카드 생성 규칙
+1. **근거 페이지 필수**: evidence_page를 정확히 표기
+2. **한 카드 = 한 단어**: 복수 의미는 뒷면에 콤마로 나열, 카드 분할 금지
+3. **언어 일관성**: word는 항상 원어, meaning은 항상 한국어
+4. **카드 수 제한**: 최대 80장. 너무 많으면 핵심 어휘만 선별
+
+## 채택 판단 (recommend 필드)
+- **단어장 표 출처**: 학습자가 이미 정리한 자료 → 모두 recommend: true
+- **지문 출처**: 시험·학습에 유용도 높은 어휘만 recommend: true
+- 전체 카드 중 70~90%를 recommend: true
+
+## 자체 검수 (출력 전 필수)
+- word가 OCR 오류로 깨진 단어가 아닌가?
+- meaning이 한국어로 정확히 번역됐는가?
+- 일본어/중국어 단어에 발음 정보가 (가능한 경우) 포함됐는가?
+- 중복 단어가 없는가?
+
+## 출력 형식 (가장 중요)
+반드시 JSON 배열만 출력하세요. 다른 텍스트, 설명, 마크다운을 추가하지 마세요.
+
+**절대 금지:**
+- 계획을 작성하지 마세요 (Plan Mode 금지)
+- 질문하거나 확인을 요청하지 마세요
+- JSON 배열 외의 어떤 텍스트도 출력하지 마세요
+첫 글자가 반드시 `[` 이어야 합니다.
+
+[
+  {
+    "front": "외국어 단어",
+    "back": "발음 / 한국어 뜻 (또는 한국어 뜻만)",
+    "evidence": "단어장 표 (페이지 N) 또는 원문 문장",
+    "evidence_page": 페이지번호,
+    "tags": "type:vocab, lang:ja|zh|en|...",
+    "recommend": true
+  }
+]"""
 
 
 # ── Step 2: 내용 분석 프롬프트 ──
@@ -435,12 +560,105 @@ async def _create_cards_from_analysis(
     raise last_error
 
 
+async def _analyze_vocab_chunk(
+    pages: List[Dict], chunk_idx: int,
+    session_id: str | None = None,
+) -> dict:
+    """Vocab Step 2: 외국어 단어 추출 (CLI 1회)"""
+    user_prompt = _build_user_prompt(pages)
+
+    page_nums = [p["page_num"] for p in pages]
+    total_text_len = sum(len(p["text"]) for p in pages)
+    logger.info("청크 #%d vocab 분석 시작: pages=%s, 텍스트=%d자", chunk_idx, page_nums, total_text_len)
+
+    raw_text = await _run_cli_with_retry(VOCAB_ANALYSIS_PROMPT, user_prompt, chunk_idx, "vocab분석", session_id=session_id)
+
+    last_error = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            content = raw_text.strip()
+            if "```json" in content:
+                content = content.split("```json", 1)[1].split("```", 1)[0]
+            elif "```" in content:
+                content = content.split("```", 1)[1].split("```", 1)[0]
+            start = content.find("{")
+            end = content.rfind("}")
+            if start == -1 or end == -1:
+                raise ValueError("vocab 분석 JSON 객체를 찾을 수 없습니다.")
+            analysis = json.loads(content[start:end + 1])
+            if "vocab_items" not in analysis:
+                analysis["vocab_items"] = []
+            logger.info("청크 #%d vocab 분석 완료: language=%s, source_type=%s, 단어 %d개",
+                        chunk_idx, analysis.get("language"), analysis.get("source_type"),
+                        len(analysis.get("vocab_items", [])))
+            return analysis
+        except (ValueError, json.JSONDecodeError) as e:
+            last_error = e
+            if attempt < MAX_RETRIES - 1:
+                delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+                logger.warning("청크 #%d vocab 분석 JSON 파싱 실패 (시도 %d/%d, %ds 후): %s | 앞 300자: %s",
+                               chunk_idx, attempt + 1, MAX_RETRIES, delay, e, raw_text[:300])
+                await asyncio.sleep(delay)
+                raw_text = await _run_cli_with_retry(VOCAB_ANALYSIS_PROMPT, user_prompt, chunk_idx, "vocab분석(재)", session_id=session_id)
+            else:
+                logger.error("청크 #%d vocab 분석 JSON 최종 실패: %s | 앞 500자: %s", chunk_idx, e, raw_text[:500])
+                raise
+    raise last_error
+
+
+async def _create_vocab_cards(
+    analysis: dict, pages: List[Dict],
+    chunk_idx: int, session_id: str | None = None,
+) -> List[Dict]:
+    """Vocab Step 3: 단어카드 생성 (CLI 1회)"""
+    source_text = _build_user_prompt(pages)
+    analysis_text = json.dumps(analysis, ensure_ascii=False, indent=2)
+
+    user_prompt = f"""## 단어 추출 결과
+{analysis_text}
+
+## 원문 텍스트 (근거 확인용)
+{source_text}"""
+
+    logger.info("청크 #%d vocab 카드 생성 시작", chunk_idx)
+    raw_text = await _run_cli_with_retry(VOCAB_CARD_PROMPT, user_prompt, chunk_idx, "vocab카드생성", session_id=session_id)
+
+    last_error = None
+    for attempt in range(MAX_RETRIES):
+        try:
+            cards_raw = _parse_cards_json(raw_text)
+            logger.info("청크 #%d vocab 카드 파싱 성공: %d장", chunk_idx, len(cards_raw))
+            return _validate_cards(cards_raw, "vocab")
+        except (ValueError, json.JSONDecodeError) as e:
+            last_error = e
+            if attempt < MAX_RETRIES - 1:
+                delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+                logger.warning("청크 #%d vocab 카드 JSON 실패 (시도 %d/%d, %ds 후): %s | 앞 300자: %s",
+                               chunk_idx, attempt + 1, MAX_RETRIES, delay, e, raw_text[:300])
+                await asyncio.sleep(delay)
+                raw_text = await _run_cli_with_retry(VOCAB_CARD_PROMPT, user_prompt, chunk_idx, "vocab카드(재)", session_id=session_id)
+            else:
+                logger.error("청크 #%d vocab 카드 JSON 최종 실패: %s | 앞 500자: %s", chunk_idx, e, raw_text[:500])
+                raise
+    raise last_error
+
+
 async def _generate_chunk(
     pages: List[Dict], template_type: str,
     chunk_idx: int = 0, session_id: str | None = None,
     is_math: bool = False,
 ) -> List[Dict]:
     """3단계 파이프라인: 분석(CLI 1회) → 카드 생성(CLI 1회). 검수는 카드 생성 프롬프트에 내장."""
+    # Vocab 모드: 별도 단어 추출 파이프라인
+    if template_type == "vocab":
+        analysis = await _analyze_vocab_chunk(pages, chunk_idx, session_id=session_id)
+        if not analysis.get("vocab_items"):
+            logger.info("청크 #%d vocab: 단어 0개, 카드 생성 건너뜀", chunk_idx)
+            return []
+        cards = await _create_vocab_cards(analysis, pages, chunk_idx, session_id=session_id)
+        logger.info("청크 #%d vocab 파이프라인 완료: %d장", chunk_idx, len(cards))
+        return cards
+
     # Step 2: 내용 분석
     analysis = await _analyze_chunk(pages, chunk_idx, session_id=session_id, is_math=is_math)
 
