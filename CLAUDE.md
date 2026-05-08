@@ -52,8 +52,9 @@ export ANDROID_HOME="$HOME/Library/Android/sdk"
 export JAVA_HOME="/opt/homebrew/Cellar/openjdk@21/21.0.10/libexec/openjdk.jdk/Contents/Home"
 export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 cd front
-flutter build apk --release
-# 결과: build/app/outputs/flutter-apk/app-release.apk (약 49MB)
+flutter build apk --release --dart-define=API_BASE_URL=https://decard-api.eupori.dev
+# 결과: build/app/outputs/flutter-apk/app-release.apk (약 52MB)
+# ⚠️ --dart-define 누락 시 localhost:8001로 빌드되어 모바일에서 "서버에 연결할 수 없습니다" 에러
 ```
 
 ---
