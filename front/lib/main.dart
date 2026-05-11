@@ -13,6 +13,9 @@ final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.dark);
 /// OAuth 토큰이 URL에서 추출되었는지 여부 (HomeScreen에서 중복 처리 방지)
 bool oauthHandledInMain = false;
 
+/// 전역 네비게이터 키 — 알림 탭 등 BuildContext 없는 위치에서 push 사용
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -55,6 +58,7 @@ class DecardApp extends StatelessWidget {
       valueListenable: themeNotifier,
       builder: (context, mode, _) {
         return MaterialApp(
+          navigatorKey: navigatorKey,
           title: '데카드',
           debugShowCheckedModeBanner: false,
           theme: AppTheme.light,

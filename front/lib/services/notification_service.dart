@@ -1,10 +1,13 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../firebase_options.dart';
+import '../main.dart' show navigatorKey;
+import '../screens/review_screen.dart';
 import 'api_service.dart';
 
 /// FCM 푸시 알림 통합 서비스.
@@ -48,7 +51,7 @@ class NotificationService {
               AndroidFlutterLocalNotificationsPlugin>()
           ?.createNotificationChannel(_channel);
 
-      // 로컬 알림 초기화
+      // 로컬 알림 초기화 (탭 콜백 포함)
       await _localPlugin.initialize(
         const InitializationSettings(
           android: AndroidInitializationSettings('@mipmap/ic_launcher'),
@@ -58,9 +61,58 @@ class NotificationService {
             requestSoundPermission: false,
           ),
         ),
+        onDidReceiveNotificationResponse: (response) {
+          // 포그라운드 로컬 알림 탭 → payload에 session_id
+          final sessionId = response.payload;
+          if (sessionId != null && sessionId.isNotEmpty) {
+            _navigateToSession(sessionId);
+          }
+        },
       );
+
+      // 백그라운드 상태에서 알림 탭 → 앱 활성화 시
+      FirebaseMessaging.onMessageOpenedApp.listen((message) {
+        final sessionId = message.data['session_id']?.toString();
+        if (sessionId != null && sessionId.isNotEmpty) {
+          _navigateToSession(sessionId);
+        }
+      });
+
+      // 앱 종료 상태에서 알림 탭 → 앱 시작 직후 1회
+      final initial = await FirebaseMessaging.instance.getInitialMessage();
+      if (initial != null) {
+        final sessionId = initial.data['session_id']?.toString();
+        if (sessionId != null && sessionId.isNotEmpty) {
+          // 첫 프레임 후 네비게이션 (navigatorKey 준비 대기)
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _navigateToSession(sessionId);
+          });
+        }
+      }
     } catch (e, st) {
       debugPrint('[NotificationService] init 실패 — 알림 비활성: $e\n$st');
+    }
+  }
+
+  /// 알림 페이로드의 session_id로 ReviewScreen 이동.
+  /// 세션 조회 실패하거나 status가 completed가 아니면 무시 (홈에서 폴링이 처리).
+  static Future<void> _navigateToSession(String sessionId) async {
+    try {
+      final session = await ApiService.getSession(sessionId);
+      if (session.status != 'completed') {
+        debugPrint('[NotificationService] 세션 status=${session.status}, 라우팅 생략');
+        return;
+      }
+      final navigator = navigatorKey.currentState;
+      if (navigator == null) {
+        debugPrint('[NotificationService] navigator 준비 안 됨');
+        return;
+      }
+      navigator.push(
+        MaterialPageRoute(builder: (_) => ReviewScreen(session: session)),
+      );
+    } catch (e) {
+      debugPrint('[NotificationService] 세션 라우팅 실패: $e');
     }
   }
 
