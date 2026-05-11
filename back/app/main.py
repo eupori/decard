@@ -33,8 +33,38 @@ app.include_router(router)
 app.include_router(auth_router)
 
 
+def _cleanup_orphaned_sessions_on_startup():
+    """서버 시작 시 processing 상태로 stuck된 세션을 즉시 정리.
+
+    asyncio.create_task로 만든 백그라운드 작업은 프로세스가 죽으면 함께 사라지므로,
+    재시작 후에는 어떤 task도 그 세션을 처리할 수 없음 → 즉시 failed로 전환.
+    멀티 워커 환경에서 두 워커가 동시 실행해도 idempotent (이미 failed면 영향 없음).
+    """
+    db = SessionLocal()
+    try:
+        stuck = db.query(SessionModel).filter(
+            SessionModel.status == "processing",
+        ).all()
+        if not stuck:
+            return
+        for s in stuck:
+            s.status = "failed"
+            s.error_message = "서버 재시작으로 처리가 중단됐어요. 다시 업로드해주세요."
+            logger.warning("startup orphan 세션 정리: %s (%s)", s.id, s.filename)
+        db.commit()
+        logger.info("startup 시 orphan 세션 %d개 정리 완료", len(stuck))
+    except Exception:
+        logger.exception("orphan 세션 정리 중 오류")
+    finally:
+        db.close()
+
+
 async def _cleanup_stuck_sessions():
-    """SESSION_TIMEOUT_MINUTES 이상 processing 상태인 세션을 failed로 전환."""
+    """SESSION_TIMEOUT_MINUTES 이상 processing 상태인 세션을 failed로 전환.
+
+    정상 동작 중인 task가 너무 오래 걸리는 경우 (예: Claude CLI hang)를 대비한 안전망.
+    서버 재시작으로 인한 orphan은 _cleanup_orphaned_sessions_on_startup에서 즉시 처리.
+    """
     timeout_minutes = settings.SESSION_TIMEOUT_MINUTES
     while True:
         db = SessionLocal()
@@ -47,11 +77,11 @@ async def _cleanup_stuck_sessions():
             for s in stuck:
                 s.status = "failed"
                 s.error_message = f"처리 시간 초과 ({timeout_minutes}분). 다시 시도해주세요."
-                logger.warning("stuck 세션 정리: %s (%s)", s.id, s.filename)
+                logger.warning("타임아웃 세션 정리: %s (%s)", s.id, s.filename)
             if stuck:
                 db.commit()
         except Exception:
-            logger.exception("stuck 세션 정리 중 오류")
+            logger.exception("타임아웃 세션 정리 중 오류")
         finally:
             db.close()
         await asyncio.sleep(300)  # 5분 주기
@@ -60,6 +90,7 @@ async def _cleanup_stuck_sessions():
 @app.on_event("startup")
 def startup():
     create_tables()
+    _cleanup_orphaned_sessions_on_startup()  # 재시작 직후 orphan 즉시 정리
     loop = asyncio.get_event_loop()
     loop.create_task(
         send_slack_alert("서버 시작", "decard-api 서버가 시작되었습니다.", "info")
