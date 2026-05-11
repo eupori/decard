@@ -350,7 +350,26 @@ static const String baseUrl = String.fromEnvironment(
   - Group A (10명): Full E2E (업로드→생성→자동채택→수정→학습→CSV→삭제)
   - Group B (10명): 스트레스(3동시), 악성입력(SQL injection/XSS/빈파일), 데이터격리, 엣지케이스, 사이드이펙트
 
-### Phase 6: 외국어 단어카드 + 이미지 PDF OCR (현재)
+### Phase 7: FCM 푸시 알림 + 안정성 (현재)
+- **FCM 푸시 알림 (Android만)**: 카드 생성 완료 시 OS 푸시 자동 발송
+  - 백엔드: `FcmTokenModel` + `fcm_service.py` (firebase-admin, lazy init, 키 없으면 비활성)
+  - `POST /api/v1/notifications/register` — user_id 또는 device_id 기반 토큰 저장
+  - `_notify_session_completed`: 카드 생성 완료 시 자동 전송 (예외는 무시 — 푸시 실패가 카드 처리 영향 X)
+  - 프론트: `firebase_core`, `firebase_messaging`, `flutter_local_notifications`
+  - `NotificationService` — 포그라운드 로컬 알림 + 백그라운드/종료 OS 자동 알림
+  - 권한 요청은 홈 첫 진입 시
+  - **웹은 미지원** (다음 이터레이션에서 Web Push 추가)
+- **서비스 계정 키**: `back/firebase-service-account.json` (`.gitignore` 보호), VPS는 docker-compose volume mount + `FCM_SERVICE_ACCOUNT_PATH` 환경변수
+- **Android 빌드 변경**: `isCoreLibraryDesugaringEnabled = true` + `multiDexEnabled = true` + `desugar_jdk_libs:2.1.4` (flutter_local_notifications 요구사항)
+- **stuck 세션 자동 복구**:
+  - 서버 재시작 시 모든 `processing` 세션을 즉시 `failed`로 전환 (`_cleanup_orphaned_sessions_on_startup`)
+  - asyncio task는 프로세스와 함께 죽으므로 재시작 후 절대 풀리지 않음 → 즉시 정리
+  - error_message: "서버 재시작으로 처리가 중단됐어요. 다시 업로드해주세요."
+  - 기존 5분 주기 timeout (15분 이상)은 정상 task hang 대비로 유지
+- **SQLite race condition 패치**: gunicorn workers=2 시작 시 동시 `create_all` 호출로 발생하는 "table already exists" 안전하게 무시
+- **APK v0.5.0-beta** GitHub release (55MB)
+
+### Phase 6: 외국어 단어카드 + 이미지 PDF OCR
 - **외국어 단어카드 (`vocab` 템플릿)**: 단어 → 발음 / 한국어 뜻
   - 자동 언어 감지 (일본어/중국어/영어/기타)
   - 일본어 → "히라가나 / 한국어 뜻" (예: 世界遺産 → せかいさん / 세계유산)
@@ -388,14 +407,18 @@ static const String baseUrl = String.fromEnvironment(
 
 ---
 
-## 다음 작업 후보 (Phase 6~)
+## 다음 작업 후보 (Phase 8~)
 
 | 우선순위 | 작업 | 설명 |
 |----------|------|------|
-| 1 | 오픈채팅방 URL 교체 | 카카오 오픈채팅 생성 후 TODO_PLACEHOLDER 교체 |
-| 2 | 테스터 모집 + 배포 | 웹 링크 + APK 링크 + 피드백 안내 메시지 |
-| 3 | Google Play Store 등록 | 앱 이름, 설명, 스크린샷, 개인정보처리방침 |
-| 4 | SRS 반복학습 | 간격 반복 알고리즘 (SM-2 등) |
-| 5 | 이메일 회원가입 | 카카오 없는 유저 대응 |
-| 6 | Google/Apple 로그인 | 실제 구현 (현재 목업) |
-| 7 | 서버 스케일업 | t3.small→t3.medium (메모리 경고 빈발 시) |
+| 1 | **웹 FCM Push 알림** | 현재 Android만 지원. Firebase 콘솔 VAPID 키 생성 → `flutterfire configure --platforms=web` → `web/firebase-messaging-sw.js` 서비스 워커 → `notification_service.dart` 웹 분기. 작업 1~2시간 |
+| 2 | **iOS APNs 설정** | Apple Developer 인증서 + Firebase 콘솔 APNs 키 업로드 + Xcode Capabilities (Push Notifications, Background Modes). iOS 빌드 시 함께 진행 |
+| 3 | 오픈채팅방 URL 교체 | 카카오 오픈채팅 생성 후 TODO_PLACEHOLDER 교체 |
+| 4 | 테스터 모집 + 배포 | 웹 링크 + APK 링크 + 피드백 안내 메시지 |
+| 5 | Google Play Store 등록 | 앱 이름, 설명, 스크린샷, 개인정보처리방침 |
+| 6 | SRS 반복학습 고도화 | 간격 반복 알고리즘 (SM-2 등) |
+| 7 | 이메일 회원가입 | 카카오 없는 유저 대응 |
+| 8 | Google/Apple 로그인 실연동 | 실제 구현 (현재 목업) |
+| 9 | DB 백업 자동화 | sqlite dump → S3 또는 EBS 스냅샷 (현재 단일 EC2 디스크 의존) |
+| 10 | 서버 스케일업 | t3.small→t3.medium (메모리 경고 빈발 시) |
+| 11 | PostgreSQL/RDS 이전 | 테스터 100명 넘으면 검토 |
