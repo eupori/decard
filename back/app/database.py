@@ -1,7 +1,12 @@
+import logging
+
 from sqlalchemy import create_engine, event, text, inspect
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
 from .config import settings
+
+logger = logging.getLogger(__name__)
 
 engine = create_engine(
     settings.DATABASE_URL,
@@ -32,7 +37,16 @@ def get_db():
 
 
 def create_tables():
-    Base.metadata.create_all(bind=engine)
+    # gunicorn 멀티 워커 시작 시 두 워커가 동시에 create_all → race condition으로
+    # "table X already exists" 발생 가능. checkfirst가 atomic하지 않은 SQLite 특성.
+    # 이미 존재하는 테이블은 안전하게 무시.
+    try:
+        Base.metadata.create_all(bind=engine)
+    except OperationalError as e:
+        if "already exists" in str(e).lower():
+            logger.info("create_all race condition 감지 (다른 워커가 먼저 생성) — 무시")
+        else:
+            raise
     _migrate_device_id()
     _migrate_users_table()
     _migrate_folders()
