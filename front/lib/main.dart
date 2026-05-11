@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'config/theme.dart';
 import 'screens/splash_screen.dart';
 import 'services/auth_service.dart';
+import 'services/notification_service.dart';
 import 'utils/web_auth_stub.dart'
     if (dart.library.html) 'utils/web_auth.dart' as web_auth;
 
@@ -14,6 +15,9 @@ bool oauthHandledInMain = false;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Firebase 초기화 (FCM 푸시 알림) — 실패해도 앱 동작에 영향 없음
+  await NotificationService.initialize();
 
   // Flutter 라우터가 hash를 소비하기 전에 OAuth 토큰 먼저 추출·저장
   if (kIsWeb) {

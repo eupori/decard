@@ -101,6 +101,19 @@ class CardReviewModel(Base):
     reviewed_at = Column(DateTime, default=datetime.utcnow)
 
 
+class FcmTokenModel(Base):
+    """FCM 푸시 알림용 디바이스 토큰. user_id 또는 device_id로 식별."""
+    __tablename__ = "fcm_tokens"
+
+    id = Column(String, primary_key=True, default=lambda: f"fcm_{uuid.uuid4().hex[:10]}")
+    user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
+    device_id = Column(String, index=True, default="anonymous")
+    token = Column(String, nullable=False, index=True)
+    platform = Column(String, default="android")  # android / ios / web
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class GradeModel(Base):
     __tablename__ = "grades"
 

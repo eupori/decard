@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "265606258144",
+    "project_id": "gen-lang-client-0907008730",
+    "storage_bucket": "gen-lang-client-0907008730.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:265606258144:android:0e4f0d1318094429c6df85",
+        "android_client_info": {
+          "package_name": "dev.eupori.decard"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBGNLfPbDyGY2pr4zKdkWMxkeUFRKUpxGE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

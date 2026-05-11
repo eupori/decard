@@ -51,6 +51,9 @@ class ApiConfig {
   static String sharedSessionUrl(String shareKey) =>
       '$baseUrl$apiPrefix/shared/$shareKey';
 
+  // Notifications
+  static String get fcmRegisterUrl => '$baseUrl$apiPrefix/notifications/register';
+
   // Explore
   static String get exploreCategoriesUrl => '$baseUrl$apiPrefix/explore/categories';
   static String get exploreCardsetsUrl => '$baseUrl$apiPrefix/explore/cardsets';

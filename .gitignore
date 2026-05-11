@@ -9,3 +9,7 @@ back/*.db-wal
 
 # 전략 문서 (비공개)
 docs/STRATEGY.md
+
+# Firebase 서비스 계정 키 (절대 커밋 금지)
+back/firebase-service-account.json
+back/firebase-service-account*.json

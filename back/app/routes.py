@@ -17,7 +17,7 @@ from .config import settings
 from .database import get_db, SessionLocal
 from .models import (
     SessionModel, CardModel, GradeModel, FolderModel, CardReviewModel,
-    PublicCardsetModel, PublicCardModel,
+    PublicCardsetModel, PublicCardModel, FcmTokenModel,
     CardResponse, CardUpdate, SessionResponse, GradeResponse,
     FolderCreate, FolderUpdate, FolderResponse, SaveToLibraryRequest,
     ManualCardInput, ManualSessionCreate,
@@ -115,6 +115,58 @@ async def generate(
     )
 
     return _build_session_response(session)
+
+
+# ──────────────────────────────────────
+# POST /api/v1/notifications/register — FCM 토큰 등록
+# ──────────────────────────────────────
+
+from pydantic import BaseModel
+
+
+class FcmRegisterRequest(BaseModel):
+    fcm_token: str
+    platform: str = "android"
+
+
+@router.post("/notifications/register")
+def register_fcm_token(
+    body: FcmRegisterRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    device_id: str = Depends(get_device_id),
+):
+    """FCM 토큰 등록/갱신. 같은 (user_id, device_id) 조합은 토큰 교체."""
+    token = (body.fcm_token or "").strip()
+    if not token:
+        raise HTTPException(400, "fcm_token이 비어있습니다.")
+    if len(token) > 4096:
+        raise HTTPException(400, "fcm_token 길이 초과")
+
+    owner = get_owner_id(request)
+    user_id = owner["user_id"]
+
+    # 같은 (user_id, device_id) 조합 + 다른 토큰이면 교체
+    q = db.query(FcmTokenModel).filter(FcmTokenModel.device_id == device_id)
+    if user_id:
+        q = q.filter(FcmTokenModel.user_id == user_id)
+    existing = q.first()
+    if existing:
+        if existing.token != token:
+            existing.token = token
+            existing.platform = body.platform
+            db.commit()
+        return {"status": "updated", "id": existing.id}
+
+    entry = FcmTokenModel(
+        user_id=user_id,
+        device_id=device_id,
+        token=token,
+        platform=body.platform,
+    )
+    db.add(entry)
+    db.commit()
+    return {"status": "created", "id": entry.id}
 
 
 # ──────────────────────────────────────
@@ -816,6 +868,33 @@ def _parse_xlsx(content: bytes) -> list[dict]:
 # Helpers
 # ──────────────────────────────────────
 
+async def _notify_session_completed(db: Session, session: SessionModel, card_count: int) -> None:
+    """카드 생성 완료 시 세션 소유자의 모든 디바이스에 FCM 푸시."""
+    from .fcm_service import send_to_tokens, is_available
+    if not is_available():
+        return
+
+    q = db.query(FcmTokenModel)
+    if session.user_id:
+        q = q.filter(FcmTokenModel.user_id == session.user_id)
+    else:
+        q = q.filter(FcmTokenModel.device_id == session.device_id)
+    tokens = [t.token for t in q.all() if t.token]
+    if not tokens:
+        return
+
+    filename = session.display_name or session.filename or "PDF"
+    if len(filename) > 30:
+        filename = filename[:27] + "..."
+
+    send_to_tokens(
+        tokens=tokens,
+        title="카드 생성 완료",
+        body=f"{filename} — {card_count}장 준비됐어요",
+        data={"session_id": session.id, "type": "session_completed"},
+    )
+
+
 async def _generate_in_background(
     session_id: str,
     pdf_content: bytes,
@@ -899,6 +978,13 @@ async def _generate_in_background(
         session.progress = 100
         db.commit()
         logger.info("백그라운드 생성 완료: session=%s, cards=%d", session_id, len(cards_data))
+
+        # FCM 푸시 알림 — 실패는 무시
+        try:
+            await _notify_session_completed(db, session, len(cards_data))
+        except Exception as fcm_err:
+            logger.warning("FCM 알림 전송 실패 session=%s: %s: %s",
+                           session_id, type(fcm_err).__name__, fcm_err)
     except Exception as e:
         logger.exception("백그라운드 카드 생성 실패: session=%s, error=%s: %s", session_id, type(e).__name__, e)
         try:

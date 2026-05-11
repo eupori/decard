@@ -9,6 +9,7 @@ import '../main.dart' show themeNotifier, oauthHandledInMain;
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/library_prefs.dart';
+import '../services/notification_service.dart';
 import '../utils/snackbar_helper.dart';
 import '../widgets/session_list_item.dart';
 import '../utils/web_auth_stub.dart'
@@ -116,6 +117,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadSessions();
     _loadStudyStats();
     _loadBillingStatus();
+    // FCM 토큰 등록 (홈 첫 진입 시 1회, 권한 요청 포함)
+    NotificationService.registerToken();
   }
 
   @override

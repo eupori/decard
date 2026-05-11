@@ -660,6 +660,23 @@ class ApiService {
 
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
+
+  /// FCM 토큰을 백엔드에 등록. 실패해도 앱 동작 영향 없으므로 bool 반환.
+  static Future<bool> registerFcmToken(String fcmToken) async {
+    try {
+      final response = await http.post(
+        Uri.parse(ApiConfig.fcmRegisterUrl),
+        headers: {
+          ...(await _headers()),
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'fcm_token': fcmToken}),
+      );
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
 }
 
 /// JSON body에서 detail 필드 추출 (nginx HTML 에러 페이지 등 비-JSON 응답 안전 처리)
