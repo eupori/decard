@@ -10,8 +10,10 @@ services:
       - MAX_CLI_PER_SESSION=2
       - MAX_CONCURRENT_SESSIONS=5
       - SESSION_TIMEOUT_MINUTES=15
+      - FCM_SERVICE_ACCOUNT_PATH=/app/firebase-service-account.json
     volumes:
       - ./data:/app/data
+      - ./firebase-service-account.json:/app/firebase-service-account.json:ro
     restart: always
     mem_limit: 1536m
     memswap_limit: 2g
