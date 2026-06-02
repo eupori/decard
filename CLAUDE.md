@@ -373,10 +373,15 @@ static const String baseUrl = String.fromEnvironment(
 - **QA** (`scripts/qa_push.py`, `dad1ae7`):
   - 10 케이스 / 16 sub-check — 모두 PASS
   - 검증: 백필 매칭, NULL 폴백 무음, 비로그인 직접 매칭, `migrated_` 차단, users.device_id 폴백, link-device 마이그레이션, 실패 본문 truncation
-- **0.5.2+12 빌드**:
-  - AAB: `build/app/outputs/bundle/release/app-release.aab` (45.5MB)
-  - IPA: `build/ios/ipa/decard.ipa` (24.8MB) → Transporter로 App Store Connect 업로드
+- **0.5.2+12 빌드 + 업로드**:
+  - AAB: `build/app/outputs/bundle/release/app-release.aab` (45.5MB) → Play Console 공개 테스트 트랙 업로드, Google 검토 대기
+  - IPA: `build/ios/ipa/decard.ipa` (24.8MB) → Transporter로 App Store Connect 업로드, 내부 테스트 즉시 사용 가능
   - **0.5.1 (11) Apple Beta 검토 통과** — 공개 링크 활성: `https://testflight.apple.com/join/9WRWdzDy`
+- **운영 정리**:
+  - 무관 Vercel 프로젝트 삭제 — repo에 연결되어 매 push마다 next build 실패. 데카드는 EC2(decard.eupori.dev)에 배포되므로 무관
+- **운영 도구 추가**:
+  - `scripts/db-snapshot.sh` — sqlite3 `.backup`으로 lock 없이 prod DB 받아 DB Browser 자동 실행 (`back/db_snapshots/`는 gitignore)
+  - `scripts/qa_push.py` — FCM 푸시 fix 회귀 검증 (10 케이스 / 16 sub-check)
 
 ### Phase 8: 정식 배포 — Play Store + App Store (2026-05-18)
 - **iOS 앱 첫 배포**:
@@ -463,19 +468,22 @@ static const String baseUrl = String.fromEnvironment(
 
 ---
 
-## 진행 중 / 대기
+## 진행 중 / 대기 (2026-06-02 기준)
 
 | 항목 | 상태 |
 |------|------|
-| Apple Beta App Review (iOS 외부 테스트) | **심사 대기 중** (2026-05-18 12:48 제출, 보통 24~48시간) — 통과 시 공개 링크 자동 활성화 |
-| Play Store 검색 인덱싱 | 출시 직후라 검색 미반영 가능 — 옵트인 URL의 직접 다운로드 링크 사용 권장 |
+| Play Console 검토 (0.5.2-beta AAB) | **검토 대기 중** (오늘 업로드) — 통과 시 공개 테스트 가입자에게 자동 배포 |
+| App Store Connect 처리 (0.5.2 IPA) | **처리 중** (오늘 업로드) — 끝나면 TestFlight 내부 테스트 즉시 사용 가능, 외부 그룹에 빌드 추가하면 Apple Beta 재검토 |
+| iOS 0.5.1 (11) 외부 테스트 | ✅ **Apple Beta 검토 통과** — 공개 링크 즉시 사용 가능: `https://testflight.apple.com/join/9WRWdzDy` |
 
 ## 다음 작업 후보
 
 | 우선순위 | 작업 | 설명 |
 |----------|------|------|
-| 1 | **iOS 외부 테스트 공개 링크 카톡 배포** | Apple 승인 메일 도착 후 TestFlight → 외부 테스트 → 설정 탭에서 공개 링크 복사 → 카톡 전송 |
-| 2 | **App Store 정식 심사 제출** | 메타데이터(스크린샷 6.9"/6.7"/5.5", 설명, 키워드, 카테고리, 연령 등급) + 빌드 0.5.1(11) 선택 → 심사 |
+| 1 | **0.5.2 외부 테스트 그룹 추가** | Connect 처리 완료 후 TestFlight → 외부 테스트 그룹의 "빌드" 탭에서 0.5.2(12) 선택 → Apple Beta 재검토 (두 번째라 보통 빠름) |
+| 2 | **지인 카톡 배포** | iOS: `https://testflight.apple.com/join/9WRWdzDy` / Android: `https://play.google.com/apps/testing/dev.eupori.decard` |
+| 3 | **푸시 fix 실측 검증** | 0.5.2 설치 후 카드 생성 완료/실패 시 푸시 정상 작동 확인 — 로그: `ssh eupori-server "docker logs decard-api-1 2>&1 \| grep -E 'FCM\|푸시' \| tail -10"` |
+| 4 | **App Store 정식 심사 제출** | 메타데이터(스크린샷 6.9"/6.7"/5.5", 설명, 키워드, 카테고리, 연령 등급) + 빌드 0.5.2(12) 선택 → 심사 |
 | 3 | 오픈채팅방 URL 교체 | 카카오 오픈채팅 생성 후 TODO_PLACEHOLDER 교체 |
 | 4 | 테스터 피드백 수집 | 안드로이드 베타 + iOS 베타 (승인 후) → 피드백 정리 |
 | 5 | **웹 FCM Push 알림** | 현재 Android만 지원. Firebase 콘솔 VAPID 키 생성 → `flutterfire configure --platforms=web` → `web/firebase-messaging-sw.js` 서비스 워커 → `notification_service.dart` 웹 분기. 작업 1~2시간 |
