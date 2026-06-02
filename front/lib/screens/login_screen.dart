@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import '../services/auth_service.dart';
+import '../services/notification_service.dart';
 import '../utils/snackbar_helper.dart';
 import '../widgets/content_width.dart';
 import '../utils/web_auth_stub.dart'
@@ -139,6 +140,7 @@ class LoginScreen extends StatelessWidget {
         if (token != null && context.mounted) {
           await AuthService.setToken(token);
           await AuthService.linkDevice();
+          await NotificationService.registerToken();
           if (context.mounted) {
             showSuccessSnackBar(context, '로그인되었습니다!');
             Navigator.pop(context, true);
@@ -158,6 +160,8 @@ class LoginScreen extends StatelessWidget {
     final error = await AuthService.loginWithGoogle();
     if (!context.mounted) return;
     if (error == null) {
+      await NotificationService.registerToken();
+      if (!context.mounted) return;
       showSuccessSnackBar(context, '로그인되었습니다!');
       Navigator.pop(context, true);
     } else {
@@ -169,6 +173,8 @@ class LoginScreen extends StatelessWidget {
     final error = await AuthService.loginWithApple();
     if (!context.mounted) return;
     if (error == null) {
+      await NotificationService.registerToken();
+      if (!context.mounted) return;
       showSuccessSnackBar(context, '로그인되었습니다!');
       Navigator.pop(context, true);
     } else {

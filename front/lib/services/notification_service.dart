@@ -9,6 +9,7 @@ import '../firebase_options.dart';
 import '../main.dart' show navigatorKey;
 import '../screens/review_screen.dart';
 import 'api_service.dart';
+import 'auth_service.dart';
 
 /// FCM 푸시 알림 통합 서비스.
 ///
@@ -29,6 +30,7 @@ class NotificationService {
   );
 
   static const String _tokenPrefKey = 'fcm_token_registered';
+  static const String _tokenOwnerPrefKey = 'fcm_token_registered_owner';
 
   /// 앱 시작 시 1회 호출. Firebase 초기화 + 로컬 알림 채널 등록.
   /// 실패해도 앱 동작에는 영향 없도록 try/catch.
@@ -116,8 +118,10 @@ class NotificationService {
     }
   }
 
-  /// 권한 요청 + FCM 토큰 받아서 백엔드 등록. 로그인/홈 진입 후 호출.
-  /// 이미 등록한 토큰이면 다시 보내지 않음 (저장된 캐시 비교).
+  /// 권한 요청 + FCM 토큰 받아서 백엔드 등록. 로그인/로그아웃/홈 진입 후 호출.
+  ///
+  /// 캐시 비교는 (token, ownerKey) 조합. ownerKey는 로그인 user_id 또는 비로그인 시 device_id.
+  /// 로그인 상태가 바뀌면 같은 토큰이라도 서버 측 user_id가 갱신되도록 재등록.
   static Future<void> registerToken() async {
     if (kIsWeb) return;
     try {
@@ -139,24 +143,48 @@ class NotificationService {
         return;
       }
 
+      final ownerKey = await _currentOwnerKey();
       final prefs = await SharedPreferences.getInstance();
-      final cached = prefs.getString(_tokenPrefKey);
-      if (cached == token) return; // 이미 등록된 토큰
+      final cachedToken = prefs.getString(_tokenPrefKey);
+      final cachedOwner = prefs.getString(_tokenOwnerPrefKey);
+      if (cachedToken == token && cachedOwner == ownerKey) {
+        return; // 같은 토큰 + 같은 소유자(로그인 상태)면 스킵
+      }
 
       final ok = await ApiService.registerFcmToken(token);
       if (ok) {
         await prefs.setString(_tokenPrefKey, token);
-        debugPrint('[NotificationService] FCM 토큰 등록 성공');
+        await prefs.setString(_tokenOwnerPrefKey, ownerKey);
+        debugPrint('[NotificationService] FCM 토큰 등록 성공 (owner=$ownerKey)');
       }
 
-      // 토큰 갱신 핸들러
-      messaging.onTokenRefresh.listen((newToken) async {
-        await ApiService.registerFcmToken(newToken);
-        await prefs.setString(_tokenPrefKey, newToken);
-      });
+      // 토큰 갱신 핸들러 — onTokenRefresh는 별도 이벤트, 다중 listen 방지를 위해 set으로 게이팅
+      _attachTokenRefreshListener();
     } catch (e) {
       debugPrint('[NotificationService] 토큰 등록 실패: $e');
     }
+  }
+
+  /// 현재 등록 소유자 식별 문자열. 로그인 시 "user:{id}", 비로그인 시 토큰 그룹 분리용 빈 문자열.
+  /// 서버는 JWT/device_id로 owner를 결정하므로 클라이언트는 user_id 변경만 감지하면 됨.
+  static Future<String> _currentOwnerKey() async {
+    final user = await AuthService.getUser();
+    final id = user?['id'] as String?;
+    return id != null ? 'user:$id' : 'anon';
+  }
+
+  static bool _tokenRefreshAttached = false;
+  static void _attachTokenRefreshListener() {
+    if (_tokenRefreshAttached) return;
+    _tokenRefreshAttached = true;
+    FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
+      final ok = await ApiService.registerFcmToken(newToken);
+      if (ok) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_tokenPrefKey, newToken);
+        await prefs.setString(_tokenOwnerPrefKey, await _currentOwnerKey());
+      }
+    });
   }
 
   static Future<void> _onForegroundMessage(RemoteMessage message) async {
