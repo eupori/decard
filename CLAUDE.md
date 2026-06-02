@@ -284,6 +284,11 @@ static const String baseUrl = String.fromEnvironment(
 12. **UTC 시간**: models.py에서 `datetime.utcnow`로 저장. API 응답에서 `isoformat() + "Z"` 필수 (프론트 DateTime.tryParse가 Z를 보고 UTC로 파싱)
 13. **Claude CLI Plan Mode 방지**: `~/.claude/settings.json`에 `"defaultMode": "plan"`이 설정되면 `claude -p` 호출에도 plan mode가 전파됨. `claude_cli.py`에서 `--permission-mode default` 플래그로 강제 차단. 모든 프롬프트에 "계획 작성 금지, JSON 배열만 출력, 첫 글자 `[`" 명시
 14. **배치 테스트**: `test_pdfs/batch_test.py` 사용. 서버는 `--reload` 없이 실행. 동시 배치 2개 이하 권장 (Semaphore=3 병목)
+15. **iOS 빌드 버전 관리**: `ios/Runner.xcodeproj/project.pbxproj`의 `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION`이 하드코딩(`1.0` / `1`)되어 있으면 pubspec.yaml 버전이 무시됨. 반드시 `$(FLUTTER_BUILD_NAME)` / `$(FLUTTER_BUILD_NUMBER)` 변수로 설정해서 모든 build configuration에서 Flutter 값을 참조하도록 함
+16. **iOS Info.plist 권한 설명 필수**: Apple은 file_picker, image_picker 등 미디어 접근 SDK가 포함된 앱에 `NSPhotoLibraryUsageDescription` 등 사용 목적 문자열을 요구. 누락 시 **ITMS-90683** 거부. 직접 권한 호출 안 해도 의존 패키지가 호출하면 거부됨. 최소: PhotoLibrary, PhotoLibraryAdd, Camera, Microphone, DocumentsFolder
+17. **Play Store 관리형 게시**: 기본 ON이라 검토 통과 후에도 "변경사항 게시" 수동 클릭해야 활성화됨. 자동 게시를 원하면 게시 개요 페이지에서 **"관리형 게시 끄기"**
+18. **TestFlight 외부 테스트**: 빌드별 Apple Beta App Review 필요 (보통 24~48시간). 통과 전엔 외부 테스터에게 "사용할 수 있는 빌드 없음" 표시. 내부 테스트는 심사 없음 (즉시 사용 가능)
+19. **개인정보처리방침**: `front/web/privacy.html` 정적 페이지로 이미 배포됨. URL: `https://decard.eupori.dev/privacy.html` (App Store/Play Store 등록 시 필수)
 
 ---
 
@@ -350,7 +355,58 @@ static const String baseUrl = String.fromEnvironment(
   - Group A (10명): Full E2E (업로드→생성→자동채택→수정→학습→CSV→삭제)
   - Group B (10명): 스트레스(3동시), 악성입력(SQL injection/XSS/빈파일), 데이터격리, 엣지케이스, 사이드이펙트
 
-### Phase 7: FCM 푸시 알림 + 안정성 (현재)
+### Phase 9: FCM 푸시 알림 4-버그 fix + 0.5.2 빌드 (2026-06-02)
+- **버그 4개 발견 (디버깅 결과)**:
+  1. `routes.py` 실패 except 블록에 푸시 발송 코드 자체 없음 → 실패 알림 무음
+  2. `auth.py:link_device_sessions`이 sessions/folders/card_reviews만 마이그레이션, **fcm_tokens는 누락** → 로그인 후 토큰의 user_id가 NULL로 남음
+  3. `routes._notify_session_completed`이 `session.user_id`로 못 찾을 때 device_id 폴백 없음
+  4. `notification_service.dart`의 SharedPreferences 캐시가 토큰만 비교 → 로그인 상태 바뀌어도 같은 토큰이면 재등록 스킵 → 서버 user_id 갱신 안 됨
+- **백엔드 fix** (`f36a91a`):
+  - `_collect_session_fcm_tokens` 헬퍼 — user_id 매칭 → users.device_id 폴백 → session.device_id 폴백 (단 `migrated_` prefix는 차단)
+  - `_notify_session_failed` 신규 + except 블록에서 호출
+  - `link_device_sessions`에 fcm_tokens user_id 채우기 추가
+  - 기존 토큰 2개 데이터 백필 (DB UPDATE)
+- **클라이언트 fix** (`10cf378`):
+  - 캐시 키를 `(token, ownerKey)` 조합으로 변경 — ownerKey=`user:{id}` 또는 `anon`
+  - 로그인 직후(카카오/Google/Apple) 명시 `registerToken()` 호출 — login_screen은 pop으로 닫혀 home_screen.initState가 재실행 안 됨
+  - `onTokenRefresh` listener 중복 방지 가드
+- **QA** (`scripts/qa_push.py`, `dad1ae7`):
+  - 10 케이스 / 16 sub-check — 모두 PASS
+  - 검증: 백필 매칭, NULL 폴백 무음, 비로그인 직접 매칭, `migrated_` 차단, users.device_id 폴백, link-device 마이그레이션, 실패 본문 truncation
+- **0.5.2+12 빌드**:
+  - AAB: `build/app/outputs/bundle/release/app-release.aab` (45.5MB)
+  - IPA: `build/ios/ipa/decard.ipa` (24.8MB) → Transporter로 App Store Connect 업로드
+  - **0.5.1 (11) Apple Beta 검토 통과** — 공개 링크 활성: `https://testflight.apple.com/join/9WRWdzDy`
+
+### Phase 8: 정식 배포 — Play Store + App Store (2026-05-18)
+- **iOS 앱 첫 배포**:
+  - `version: 0.5.1+11` (pubspec.yaml)
+  - `project.pbxproj` 하드코딩 수정 — `MARKETING_VERSION = 1.0` / `CURRENT_PROJECT_VERSION = 1` → `$(FLUTTER_BUILD_NAME)` / `$(FLUTTER_BUILD_NUMBER)` (모든 build configuration에 적용)
+  - `Info.plist` 권한 설명 5종 추가 (ITMS-90683 거부 대응):
+    - `NSPhotoLibraryUsageDescription`, `NSPhotoLibraryAddUsageDescription`
+    - `NSCameraUsageDescription`, `NSMicrophoneUsageDescription`
+    - `NSDocumentsFolderUsageDescription`
+  - `Runner.entitlements`: `aps-environment = development`
+  - Apple Distribution 인증서 + Distribution Provisioning Profile 발급 (Apple Developer Console에서 manual 생성)
+  - 빌드: `flutter build ipa --release --dart-define=API_BASE_URL=https://decard-api.eupori.dev` → `build/ios/ipa/decard.ipa` (24.8MB)
+  - 업로드: Transporter 앱으로 App Store Connect 전송
+- **TestFlight 내부 테스트**:
+  - "내부 테스트" 그룹 생성, 본인 Apple ID 추가
+  - 빌드 0.5.1 (11) — "테스트 준비 완료" ✅ (심사 불필요, 즉시 사용 가능)
+- **TestFlight 외부 테스트** (Apple Beta App Review 대기 중):
+  - "외부 테스트" 그룹 생성, 테스터 2명 추가
+  - 베타 앱 리뷰 정보 제출: 베타 앱 설명, 피드백 이메일, 마케팅 URL, 개인정보처리방침 URL(`https://decard.eupori.dev/privacy.html`)
+  - **공개 링크 활성화** — 승인 후 자동 작동
+  - 수출 규정: HTTPS만 사용 → "암호화 사용 = 아니요" 처리
+- **Play Store 공개 테스트 출시 완료**:
+  - 버전: 0.5.1-beta (11), AAB 9.42MB
+  - 관리형 게시 OFF (검토 통과 시 자동 게시)
+  - Google Beta 검토 통과 → 한국에서 100% 출시 활성
+  - 옵트인 URL: `https://play.google.com/apps/testing/dev.eupori.decard`
+  - "무제한 테스터" 설정 — 누구나 링크로 가입 가능
+- **개인정보처리방침**: `front/web/privacy.html` 이미 배포됨 (`https://decard.eupori.dev/privacy.html`, `https://decard.eupori.dev/privacy`)
+
+### Phase 7: FCM 푸시 알림 + 안정성
 - **FCM 푸시 알림 (Android만)**: 카드 생성 완료 시 OS 푸시 자동 발송
   - 백엔드: `FcmTokenModel` + `fcm_service.py` (firebase-admin, lazy init, 키 없으면 비활성)
   - `POST /api/v1/notifications/register` — user_id 또는 device_id 기반 토큰 저장
@@ -407,18 +463,26 @@ static const String baseUrl = String.fromEnvironment(
 
 ---
 
-## 다음 작업 후보 (Phase 8~)
+## 진행 중 / 대기
+
+| 항목 | 상태 |
+|------|------|
+| Apple Beta App Review (iOS 외부 테스트) | **심사 대기 중** (2026-05-18 12:48 제출, 보통 24~48시간) — 통과 시 공개 링크 자동 활성화 |
+| Play Store 검색 인덱싱 | 출시 직후라 검색 미반영 가능 — 옵트인 URL의 직접 다운로드 링크 사용 권장 |
+
+## 다음 작업 후보
 
 | 우선순위 | 작업 | 설명 |
 |----------|------|------|
-| 1 | **웹 FCM Push 알림** | 현재 Android만 지원. Firebase 콘솔 VAPID 키 생성 → `flutterfire configure --platforms=web` → `web/firebase-messaging-sw.js` 서비스 워커 → `notification_service.dart` 웹 분기. 작업 1~2시간 |
-| 2 | **iOS APNs 설정** | Apple Developer 인증서 + Firebase 콘솔 APNs 키 업로드 + Xcode Capabilities (Push Notifications, Background Modes). iOS 빌드 시 함께 진행 |
+| 1 | **iOS 외부 테스트 공개 링크 카톡 배포** | Apple 승인 메일 도착 후 TestFlight → 외부 테스트 → 설정 탭에서 공개 링크 복사 → 카톡 전송 |
+| 2 | **App Store 정식 심사 제출** | 메타데이터(스크린샷 6.9"/6.7"/5.5", 설명, 키워드, 카테고리, 연령 등급) + 빌드 0.5.1(11) 선택 → 심사 |
 | 3 | 오픈채팅방 URL 교체 | 카카오 오픈채팅 생성 후 TODO_PLACEHOLDER 교체 |
-| 4 | 테스터 모집 + 배포 | 웹 링크 + APK 링크 + 피드백 안내 메시지 |
-| 5 | Google Play Store 등록 | 앱 이름, 설명, 스크린샷, 개인정보처리방침 |
-| 6 | SRS 반복학습 고도화 | 간격 반복 알고리즘 (SM-2 등) |
-| 7 | 이메일 회원가입 | 카카오 없는 유저 대응 |
-| 8 | Google/Apple 로그인 실연동 | 실제 구현 (현재 목업) |
-| 9 | DB 백업 자동화 | sqlite dump → S3 또는 EBS 스냅샷 (현재 단일 EC2 디스크 의존) |
-| 10 | 서버 스케일업 | t3.small→t3.medium (메모리 경고 빈발 시) |
-| 11 | PostgreSQL/RDS 이전 | 테스터 100명 넘으면 검토 |
+| 4 | 테스터 피드백 수집 | 안드로이드 베타 + iOS 베타 (승인 후) → 피드백 정리 |
+| 5 | **웹 FCM Push 알림** | 현재 Android만 지원. Firebase 콘솔 VAPID 키 생성 → `flutterfire configure --platforms=web` → `web/firebase-messaging-sw.js` 서비스 워커 → `notification_service.dart` 웹 분기. 작업 1~2시간 |
+| 6 | **iOS APNs 푸시 키 업로드** | Apple Developer 인증서 + Firebase 콘솔 APNs 키 업로드 (현재 `aps-environment = development`만 설정됨, 실제 키 필요) |
+| 7 | SRS 반복학습 고도화 | 간격 반복 알고리즘 (SM-2 등) |
+| 8 | 이메일 회원가입 | 카카오 없는 유저 대응 |
+| 9 | Google/Apple 로그인 실연동 | 실제 구현 (현재 목업) |
+| 10 | DB 백업 자동화 | sqlite dump → S3 또는 EBS 스냅샷 (현재 단일 EC2 디스크 의존) |
+| 11 | 서버 스케일업 | t3.small→t3.medium (메모리 경고 빈발 시) |
+| 12 | PostgreSQL/RDS 이전 | 테스터 100명 넘으면 검토 |
