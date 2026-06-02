@@ -11,7 +11,7 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .models import UserModel, SessionModel, FolderModel, CardReviewModel
+from .models import UserModel, SessionModel, FolderModel, CardReviewModel, FcmTokenModel
 
 logger = logging.getLogger(__name__)
 
@@ -346,6 +346,16 @@ def link_device_sessions(db: Session, user: UserModel, device_id: str):
     for r in reviews:
         r.user_id = user.id
         r.device_id = f"migrated_{user.id}"
+    db.commit()
+
+    # FCM 토큰도 user_id 채우기 — 카드 생성 푸시가 user_id 매칭으로 작동
+    # device_id는 그대로 유지 (디바이스 식별자라서, 다른 자원처럼 `migrated_`로 바꾸면 안 됨)
+    fcm_tokens = db.query(FcmTokenModel).filter(
+        FcmTokenModel.device_id == device_id,
+        FcmTokenModel.user_id.is_(None),
+    ).all()
+    for f in fcm_tokens:
+        f.user_id = user.id
     db.commit()
 
     logger.info("Linked %d sessions, %d folders, %d reviews from device %s to user %s",

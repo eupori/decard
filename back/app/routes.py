@@ -868,19 +868,43 @@ def _parse_xlsx(content: bytes) -> list[dict]:
 # Helpers
 # ──────────────────────────────────────
 
+def _collect_session_fcm_tokens(db: Session, session: SessionModel) -> list[str]:
+    """세션 소유자의 FCM 토큰 수집. user_id 매칭 우선, 못 찾으면 device_id 폴백.
+
+    link-device 마이그레이션 이전에 등록된 토큰들은 user_id가 NULL이고 device_id만 채워져 있어서
+    user_id 매칭으로는 영원히 못 찾는다. 그래서 origin device_id로도 한 번 더 조회한다.
+    sessions/folders는 마이그레이션 시 session.device_id가 `migrated_{user_id}`로 바뀌므로
+    유저의 현재 device_id(users.device_id)를 추가 사용.
+    """
+    tokens: set[str] = set()
+
+    if session.user_id:
+        rows = db.query(FcmTokenModel).filter(FcmTokenModel.user_id == session.user_id).all()
+        tokens.update(t.token for t in rows if t.token)
+
+        # 폴백: 유저의 device_id로도 조회 (마이그레이션 이전 토큰 대응)
+        from .models import UserModel
+        user = db.query(UserModel).filter(UserModel.id == session.user_id).first()
+        if user and user.device_id:
+            rows = db.query(FcmTokenModel).filter(FcmTokenModel.device_id == user.device_id).all()
+            tokens.update(t.token for t in rows if t.token)
+
+    if not tokens and session.device_id and not session.device_id.startswith("migrated_"):
+        rows = db.query(FcmTokenModel).filter(FcmTokenModel.device_id == session.device_id).all()
+        tokens.update(t.token for t in rows if t.token)
+
+    return [t for t in tokens if t]
+
+
 async def _notify_session_completed(db: Session, session: SessionModel, card_count: int) -> None:
     """카드 생성 완료 시 세션 소유자의 모든 디바이스에 FCM 푸시."""
     from .fcm_service import send_to_tokens, is_available
     if not is_available():
         return
 
-    q = db.query(FcmTokenModel)
-    if session.user_id:
-        q = q.filter(FcmTokenModel.user_id == session.user_id)
-    else:
-        q = q.filter(FcmTokenModel.device_id == session.device_id)
-    tokens = [t.token for t in q.all() if t.token]
+    tokens = _collect_session_fcm_tokens(db, session)
     if not tokens:
+        logger.info("FCM 토큰 없음 — 푸시 생략 session=%s user_id=%s", session.id, session.user_id)
         return
 
     filename = session.display_name or session.filename or "PDF"
@@ -892,6 +916,34 @@ async def _notify_session_completed(db: Session, session: SessionModel, card_cou
         title="카드 생성 완료",
         body=f"{filename} — {card_count}장 준비됐어요",
         data={"session_id": session.id, "type": "session_completed"},
+    )
+
+
+async def _notify_session_failed(db: Session, session: SessionModel) -> None:
+    """카드 생성 실패 시 세션 소유자에게 FCM 푸시."""
+    from .fcm_service import send_to_tokens, is_available
+    if not is_available():
+        return
+
+    tokens = _collect_session_fcm_tokens(db, session)
+    if not tokens:
+        logger.info("FCM 토큰 없음 — 실패 푸시 생략 session=%s user_id=%s", session.id, session.user_id)
+        return
+
+    filename = session.display_name or session.filename or "PDF"
+    if len(filename) > 24:
+        filename = filename[:21] + "..."
+
+    # 본문은 사용자 친화 에러 메시지 그대로 (앞에서 정리해둠)
+    err_msg = session.error_message or "다시 시도해주세요."
+    if len(err_msg) > 80:
+        err_msg = err_msg[:77] + "..."
+
+    send_to_tokens(
+        tokens=tokens,
+        title=f"카드 생성 실패 — {filename}",
+        body=err_msg,
+        data={"session_id": session.id, "type": "session_failed"},
     )
 
 
@@ -987,6 +1039,7 @@ async def _generate_in_background(
                            session_id, type(fcm_err).__name__, fcm_err)
     except Exception as e:
         logger.exception("백그라운드 카드 생성 실패: session=%s, error=%s: %s", session_id, type(e).__name__, e)
+        failed_session = None
         try:
             session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
             if session:
@@ -1006,9 +1059,19 @@ async def _generate_in_background(
                 else:
                     session.error_message = f"카드 생성 중 오류가 발생했습니다: {err_str[:200]}"
                 db.commit()
+                failed_session = session
                 logger.info("세션 실패 저장 완료: session=%s, error_message=%s", session_id, session.error_message)
         except Exception as db_err:
             logger.error("세션 실패 상태 업데이트 불가: session=%s, db_error=%s: %s", session_id, type(db_err).__name__, db_err)
+
+        # FCM 푸시 알림 (실패) — 알림 실패는 무시
+        if failed_session is not None:
+            try:
+                await _notify_session_failed(db, failed_session)
+            except Exception as fcm_err:
+                logger.warning("FCM 실패 알림 전송 실패 session=%s: %s: %s",
+                               session_id, type(fcm_err).__name__, fcm_err)
+
         from .slack import send_slack_alert
         await send_slack_alert(
             "카드 생성 실패",
